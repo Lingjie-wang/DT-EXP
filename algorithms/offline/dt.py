@@ -1,8 +1,11 @@
 # inspiration:
 # 1. https://github.com/kzl/decision-transformer/blob/master/gym/decision_transformer/models/decision_transformer.py  # noqa
 # 2. https://github.com/karpathy/minGPT
+import fcntl
 import os
 import random
+import subprocess
+import urllib.error
 import uuid
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -14,15 +17,19 @@ import numpy as np
 import pyrallis
 import torch
 import torch.nn as nn
-import wandb
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, IterableDataset
 from tqdm.auto import tqdm, trange  # noqa
 
+import wandb
+
+REWARD_MODES = ("original", "delayed")
+
+
 @dataclass
 class TrainConfig:
     # wandb params
-    project: str = "CORL"
+    project: str = "CORL-DDR"
     group: str = "DT-D4RL"
     name: str = "DT"
     # model params
@@ -45,6 +52,7 @@ class TrainConfig:
     update_steps: int = 100_000
     warmup_steps: int = 10_000
     reward_scale: float = 0.001
+    reward_mode: str = "original"
     num_workers: int = 4
     # evaluation params
     target_returns: Tuple[float, ...] = (12000.0, 6000.0)
@@ -58,6 +66,7 @@ class TrainConfig:
     device: str = "cuda"
 
     def __post_init__(self):
+        validate_reward_mode(self.reward_mode)
         self.name = f"{self.name}-{self.env_name}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
             self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
@@ -83,6 +92,8 @@ def wandb_init(config: dict) -> None:
         project=config["project"],
         group=config["group"],
         name=config["name"],
+        job_type=config["reward_mode"],
+        tags=[config["reward_mode"], config["env_name"]],
         id=str(uuid.uuid4()),
     )
     wandb.run.save()
@@ -127,11 +138,89 @@ def discounted_cumsum(x: np.ndarray, gamma: float) -> np.ndarray:
     return cumsum
 
 
+def validate_reward_mode(reward_mode: str) -> None:
+    if reward_mode not in REWARD_MODES:
+        raise ValueError(
+            f"Unknown reward mode: {reward_mode!r}. Expected one of {REWARD_MODES}."
+        )
+
+
+def transform_trajectory_rewards(
+    rewards: np.ndarray, reward_mode: str
+) -> np.ndarray:
+    """Return original rewards or move the trajectory return to its final step."""
+    validate_reward_mode(reward_mode)
+    rewards = np.asarray(rewards, dtype=np.float32)
+    if reward_mode == "original":
+        return rewards.copy()
+
+    delayed_rewards = np.zeros_like(rewards)
+    if delayed_rewards.size:
+        delayed_rewards[-1] = rewards.sum()
+    return delayed_rewards
+
+
+def download_d4rl_dataset_with_curl(env: gym.Env) -> Dict[str, np.ndarray]:
+    """Download a D4RL dataset when urllib cannot handle a SOCKS proxy."""
+    dataset_url = env.dataset_url
+    dataset_path = env.dataset_filepath
+    partial_path = f"{dataset_path}.part"
+    lock_path = f"{dataset_path}.lock"
+    os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
+
+    # Multiple seeds may start together on a multi-GPU machine. Only one of
+    # them should download a given dataset; the others wait and reuse it.
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        if os.path.exists(dataset_path):
+            return env.get_dataset(h5path=dataset_path)
+
+        print(
+            "urllib could not download through the configured proxy; "
+            f"falling back to curl: {dataset_url}"
+        )
+        subprocess.run(
+            [
+                "curl",
+                "--fail",
+                "--location",
+                "--retry",
+                "5",
+                "--retry-all-errors",
+                "--continue-at",
+                "-",
+                "--output",
+                partial_path,
+                dataset_url,
+            ],
+            check=True,
+        )
+        # Loading the temporary file validates that it is a readable D4RL HDF5
+        # dataset before it becomes the shared cache entry.
+        dataset = env.get_dataset(h5path=partial_path)
+        os.replace(partial_path, dataset_path)
+        return dataset
+
+
+def get_d4rl_dataset(env: gym.Env) -> Dict[str, np.ndarray]:
+    try:
+        return env.get_dataset()
+    except urllib.error.URLError:
+        if not getattr(env, "dataset_url", None):
+            raise
+        return download_d4rl_dataset_with_curl(env)
+
+
 def load_d4rl_trajectories(
-    env_name: str, gamma: float = 1.0
+    env_name: str, gamma: float = 1.0, reward_mode: str = "original"
 ) -> Tuple[List[DefaultDict[str, np.ndarray]], Dict[str, Any]]:
-    dataset = gym.make(env_name).get_dataset()
+    validate_reward_mode(reward_mode)
+    dataset = get_d4rl_dataset(gym.make(env_name))
     traj, traj_len = [], []
+    original_nonzero_rewards = 0
+    transformed_nonzero_rewards = 0
+    num_transitions = 0
+    episode_returns = []
 
     data_ = defaultdict(list)
     for i in trange(dataset["rewards"].shape[0], desc="Processing trajectories"):
@@ -141,12 +230,20 @@ def load_d4rl_trajectories(
 
         if dataset["terminals"][i] or dataset["timeouts"][i]:
             episode_data = {k: np.array(v, dtype=np.float32) for k, v in data_.items()}
+            original_rewards = episode_data["rewards"]
+            episode_data["rewards"] = transform_trajectory_rewards(
+                original_rewards, reward_mode
+            )
             # return-to-go if gamma=1.0, just discounted returns else
             episode_data["returns"] = discounted_cumsum(
                 episode_data["rewards"], gamma=gamma
             )
             traj.append(episode_data)
             traj_len.append(episode_data["actions"].shape[0])
+            num_transitions += original_rewards.size
+            original_nonzero_rewards += np.count_nonzero(original_rewards)
+            transformed_nonzero_rewards += np.count_nonzero(episode_data["rewards"])
+            episode_returns.append(float(original_rewards.sum()))
             # reset trajectory buffer
             data_ = defaultdict(list)
 
@@ -155,18 +252,42 @@ def load_d4rl_trajectories(
         "obs_mean": dataset["observations"].mean(0, keepdims=True),
         "obs_std": dataset["observations"].std(0, keepdims=True) + 1e-6,
         "traj_lens": np.array(traj_len),
+        "num_trajectories": len(traj),
+        "num_transitions": num_transitions,
+        "original_nonzero_reward_fraction": (
+            original_nonzero_rewards / num_transitions
+        ),
+        "nonzero_reward_fraction": transformed_nonzero_rewards / num_transitions,
+        "return_mean": float(np.mean(episode_returns)),
+        "return_std": float(np.std(episode_returns)),
+        "return_min": float(np.min(episode_returns)),
+        "return_max": float(np.max(episode_returns)),
     }
     return traj, info
 
 
 class SequenceDataset(IterableDataset):
-    def __init__(self, env_name: str, seq_len: int = 10, reward_scale: float = 1.0):
-        self.dataset, info = load_d4rl_trajectories(env_name, gamma=1.0)
+    def __init__(
+        self,
+        env_name: str,
+        seq_len: int = 10,
+        reward_scale: float = 1.0,
+        reward_mode: str = "original",
+    ):
+        self.dataset, info = load_d4rl_trajectories(
+            env_name, gamma=1.0, reward_mode=reward_mode
+        )
         self.reward_scale = reward_scale
         self.seq_len = seq_len
+        self.reward_mode = reward_mode
 
         self.state_mean = info["obs_mean"]
         self.state_std = info["obs_std"]
+        self.stats = {
+            key: value
+            for key, value in info.items()
+            if key not in ("obs_mean", "obs_std", "traj_lens")
+        }
         # https://github.com/kzl/decision-transformer/blob/e2d82e68f330c00f763507b3b01d774740bee53f/gym/experiment.py#L116 # noqa
         self.sample_prob = info["traj_lens"] / info["traj_lens"].sum()
 
@@ -359,7 +480,9 @@ def eval_rollout(
     env: gym.Env,
     target_return: float,
     device: str = "cpu",
+    reward_mode: str = "original",
 ) -> Tuple[float, float]:
+    validate_reward_mode(reward_mode)
     states = torch.zeros(
         1, model.episode_len + 1, model.state_dim, dtype=torch.float, device=device
     )
@@ -390,7 +513,12 @@ def eval_rollout(
         # at step t, we predict a_t, get s_{t + 1}, r_{t + 1}
         actions[:, step] = torch.as_tensor(predicted_action)
         states[:, step + 1] = torch.as_tensor(next_state)
-        returns[:, step + 1] = torch.as_tensor(returns[:, step] - reward)
+        # Delayed-reward trajectories have a constant RTG until their terminal
+        # transition. The terminal reward cannot affect any subsequent action.
+        conditioning_reward = reward if reward_mode == "original" else 0.0
+        returns[:, step + 1] = torch.as_tensor(
+            returns[:, step] - conditioning_reward
+        )
 
         episode_return += reward
         episode_len += 1
@@ -409,7 +537,13 @@ def train(config: TrainConfig):
 
     # data & dataloader setup
     dataset = SequenceDataset(
-        config.env_name, seq_len=config.seq_len, reward_scale=config.reward_scale
+        config.env_name,
+        seq_len=config.seq_len,
+        reward_scale=config.reward_scale,
+        reward_mode=config.reward_mode,
+    )
+    wandb.log(
+        {f"dataset/{key}": value for key, value in dataset.stats.items()}, step=0
     )
     trainloader = DataLoader(
         dataset,
@@ -498,15 +632,18 @@ def train(config: TrainConfig):
             for target_return in config.target_returns:
                 eval_env.seed(config.eval_seed)
                 eval_returns = []
+                eval_lengths = []
                 for _ in trange(config.eval_episodes, desc="Evaluation", leave=False):
                     eval_return, eval_len = eval_rollout(
                         model=model,
                         env=eval_env,
                         target_return=target_return * config.reward_scale,
                         device=config.device,
+                        reward_mode=config.reward_mode,
                     )
                     # unscale for logging & correct normalized score computation
                     eval_returns.append(eval_return / config.reward_scale)
+                    eval_lengths.append(eval_len)
 
                 normalized_scores = (
                     eval_env.get_normalized_score(np.array(eval_returns)) * 100
@@ -515,6 +652,8 @@ def train(config: TrainConfig):
                     {
                         f"eval/{target_return}_return_mean": np.mean(eval_returns),
                         f"eval/{target_return}_return_std": np.std(eval_returns),
+                        f"eval/{target_return}_length_mean": np.mean(eval_lengths),
+                        f"eval/{target_return}_length_std": np.std(eval_lengths),
                         f"eval/{target_return}_normalized_score_mean": np.mean(
                             normalized_scores
                         ),
@@ -533,6 +672,8 @@ def train(config: TrainConfig):
             "state_std": dataset.state_std,
         }
         torch.save(checkpoint, os.path.join(config.checkpoints_path, "dt_checkpoint.pt"))
+
+    wandb.finish()
 
 
 if __name__ == "__main__":
