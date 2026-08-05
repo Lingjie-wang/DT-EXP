@@ -28,6 +28,8 @@ docker build -t <image_name> .
 docker run --gpus=all -it --rm --name <container_name> <image_name>
 ```
 
+For a reproducible Conda, MuJoCo, D4RL dataset, W&B, and `screen` setup,
+see [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md).
 
 ## Algorithms Implemented
 
