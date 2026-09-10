@@ -5,7 +5,9 @@ locally aligned trajectory forks.  Hard-positive DT always reduces error on the
 preferred action.  Hard-fork DT uses the non-preferred action only as a detached
 stopping boundary, so it can decide when a correction is still necessary but
 can never push the policy away without bound.  A frozen reference model anchors
-predictions at the CORL evaluation return.
+predictions at the CORL evaluation return.  The target-aligned variant adds
+active-pair normalization, online priority sampling, and multiple evaluation
+return conditions while preserving the original modes for direct comparison.
 """
 
 import copy
@@ -51,6 +53,15 @@ class SAPTrainConfig(TrainConfig):
     preference_mode: str = "state_aligned"
     preference_arrays_path: Optional[str] = None
     preference_hardness_temperature: float = 0.05
+    active_only_normalization: bool = False
+    preference_min_active_pairs: int = 16
+    prioritized_pair_sampling: bool = False
+    dynamic_priority_mix: float = 0.5
+    dynamic_priority_ema: float = 0.9
+    target_aligned_preference: bool = False
+    recorded_target_fraction: float = 0.5
+    preference_target_return_low: float = 6_000.0
+    preference_target_return_high: float = 12_000.0
     reference_checkpoint_path: Optional[str] = None
     pretrained_checkpoint_path: Optional[str] = None
 
@@ -77,12 +88,22 @@ class StateAlignedPreferenceDataset(IterableDataset):
         pair_seed: int,
         pair_arrays_path: Optional[str] = None,
         hardness_temperature: float = 0.05,
+        prioritized_sampling: bool = False,
+        dynamic_priority_mix: float = 0.5,
+        dynamic_priority_ema: float = 0.9,
     ):
         self.trajectories = sequence_dataset.dataset
         self.seq_len = sequence_dataset.seq_len
         self.state_mean = sequence_dataset.state_mean.astype(np.float32)
         self.state_std = sequence_dataset.state_std.astype(np.float32)
         self.reward_scale = sequence_dataset.reward_scale
+        if not 0.0 <= dynamic_priority_mix <= 1.0:
+            raise ValueError("dynamic_priority_mix must be in [0, 1]")
+        if not 0.0 <= dynamic_priority_ema < 1.0:
+            raise ValueError("dynamic_priority_ema must be in [0, 1)")
+        self.prioritized_sampling = prioritized_sampling
+        self.dynamic_priority_mix = float(dynamic_priority_mix)
+        self.dynamic_priority_ema = float(dynamic_priority_ema)
         if not 0.0 < state_keep_fraction <= 1.0:
             raise ValueError("preference_state_keep_fraction must be in (0, 1]")
         self.state_keep_fraction = float(state_keep_fraction)
@@ -145,6 +166,7 @@ class StateAlignedPreferenceDataset(IterableDataset):
                 "return_gap_mean": float(return_gaps.mean()),
                 "return_gap_min": float(return_gaps.min()),
             }
+            self._initialize_priorities()
             return
 
         good_trajectories = np.flatnonzero(trajectory_returns >= good_threshold)
@@ -243,6 +265,53 @@ class StateAlignedPreferenceDataset(IterableDataset):
             "return_gap_mean": float(return_gaps.mean()),
             "return_gap_min": float(return_gaps.min()),
         }
+        self._initialize_priorities()
+
+    def _initialize_priorities(self) -> None:
+        base = np.maximum(self.pair_confidences.astype(np.float64), 1e-8)
+        self.base_sampling_probabilities = base / base.sum()
+        self.dynamic_priorities = base.copy()
+        self.sampling_probabilities = self.base_sampling_probabilities.copy()
+        self.stats["prioritized_sampling"] = float(self.prioritized_sampling)
+        self.stats["dynamic_priority_mix"] = self.dynamic_priority_mix
+
+    def update_priorities(
+        self,
+        pair_indices: torch.Tensor,
+        margin_violations: torch.Tensor,
+        preference_margin: float,
+    ) -> None:
+        """Update sampled-pair priorities using the current model's violations."""
+        if not self.prioritized_sampling:
+            return
+
+        indices = pair_indices.detach().cpu().numpy().astype(np.int64)
+        violations = np.maximum(
+            margin_violations.detach().cpu().numpy().astype(np.float64), 0.0
+        )
+        scale = max(float(preference_margin), 1e-6)
+        # Aggregate duplicate samples before applying the EMA so batch ordering
+        # cannot change the update.
+        unique_indices, inverse = np.unique(indices, return_inverse=True)
+        violation_sum = np.zeros(len(unique_indices), dtype=np.float64)
+        violation_count = np.zeros(len(unique_indices), dtype=np.float64)
+        np.add.at(violation_sum, inverse, violations)
+        np.add.at(violation_count, inverse, 1.0)
+        mean_violation = violation_sum / np.maximum(violation_count, 1.0)
+        target_priority = self.pair_confidences[unique_indices].astype(
+            np.float64
+        ) * (1.0 + mean_violation / scale)
+        self.dynamic_priorities[unique_indices] = (
+            self.dynamic_priority_ema * self.dynamic_priorities[unique_indices]
+            + (1.0 - self.dynamic_priority_ema) * target_priority
+        )
+        dynamic_probabilities = (
+            self.dynamic_priorities / self.dynamic_priorities.sum()
+        )
+        self.sampling_probabilities = (
+            (1.0 - self.dynamic_priority_mix) * self.base_sampling_probabilities
+            + self.dynamic_priority_mix * dynamic_probabilities
+        )
 
     def _make_buckets(
         self, trajectory_indices: np.ndarray, bucket_width: int
@@ -306,14 +375,23 @@ class StateAlignedPreferenceDataset(IterableDataset):
 
     def __iter__(self):
         while True:
-            pair_index = np.random.randint(len(self.pairs))
+            if self.prioritized_sampling:
+                pair_index = np.random.choice(
+                    len(self.pairs), p=self.sampling_probabilities
+                )
+                # Confidence is already represented by the sampling distribution.
+                loss_weight = np.float32(1.0)
+            else:
+                pair_index = np.random.randint(len(self.pairs))
+                loss_weight = self.pair_confidences[pair_index]
             good_traj, good_step, bad_traj, bad_step = self.pairs[pair_index]
             negative_action = self.trajectories[int(bad_traj)]["actions"][
                 int(bad_step)
             ].copy()
             yield self._context(int(good_traj), int(good_step)) + (
                 negative_action,
-                self.pair_confidences[pair_index],
+                loss_weight,
+                np.int64(pair_index),
             )
 
 
@@ -337,18 +415,62 @@ def predict_action(
     return predictions[batch_index, target_index]
 
 
+def mix_preference_returns(
+    recorded_returns: torch.Tensor,
+    mask: torch.Tensor,
+    reward_scale: float,
+    recorded_fraction: float,
+    target_return_low: float,
+    target_return_high: float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Use recorded, low-target, and high-target RTGs with fixed proportions."""
+    if not 0.0 <= recorded_fraction <= 1.0:
+        raise ValueError("recorded_target_fraction must be in [0, 1]")
+
+    batch_size = recorded_returns.shape[0]
+    draw = torch.rand(batch_size, device=recorded_returns.device)
+    remaining_fraction = 1.0 - recorded_fraction
+    low_boundary = recorded_fraction + remaining_fraction / 2.0
+    target_mode = torch.zeros(
+        batch_size, dtype=torch.long, device=recorded_returns.device
+    )
+    target_mode[draw >= recorded_fraction] = 1
+    target_mode[draw >= low_boundary] = 2
+
+    mixed_returns = recorded_returns.clone()
+    low_returns = torch.full_like(
+        recorded_returns, target_return_low * reward_scale
+    ) * mask
+    high_returns = torch.full_like(
+        recorded_returns, target_return_high * reward_scale
+    ) * mask
+    mixed_returns = torch.where(
+        (target_mode == 1).unsqueeze(-1), low_returns, mixed_returns
+    )
+    mixed_returns = torch.where(
+        (target_mode == 2).unsqueeze(-1), high_returns, mixed_returns
+    )
+    return mixed_returns, target_mode
+
+
 @pyrallis.wrap()
 def train(config: SAPTrainConfig):
     if config.preference_mode not in {
+        "control",
         "state_aligned",
         "hard_positive",
         "hard_fork",
     }:
         raise ValueError(f"Unknown preference_mode: {config.preference_mode}")
-    if config.preference_mode != "state_aligned" and not config.preference_arrays_path:
+    if (
+        config.preference_mode in {"hard_positive", "hard_fork"}
+        and not config.preference_arrays_path
+    ):
         raise ValueError(
             "hard_positive and hard_fork require preference_arrays_path"
         )
+    if config.preference_min_active_pairs < 1:
+        raise ValueError("preference_min_active_pairs must be positive")
     set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
     wandb_init(asdict(config))
 
@@ -390,34 +512,40 @@ def train(config: SAPTrainConfig):
         max_action=config.max_action,
     ).to(config.device)
 
-    preference_dataset = StateAlignedPreferenceDataset(
-        sequence_dataset=dataset,
-        state_keep_fraction=config.preference_state_keep_fraction,
-        good_quantile=config.preference_good_quantile,
-        bad_quantile=config.preference_bad_quantile,
-        timestep_bucket=config.preference_timestep_bucket,
-        num_pairs=config.preference_num_pairs,
-        num_candidates=config.preference_num_candidates,
-        pair_seed=config.preference_pair_seed,
-        pair_arrays_path=config.preference_arrays_path,
-        hardness_temperature=config.preference_hardness_temperature,
-    )
-    wandb.log(
-        {
-            f"preference_data/{key}": value
-            for key, value in preference_dataset.stats.items()
-        },
-        step=0,
-    )
-    preference_generator = torch.Generator()
-    preference_generator.manual_seed(config.preference_pair_seed)
-    preference_loader = DataLoader(
-        preference_dataset,
-        batch_size=config.preference_batch_size,
-        pin_memory=True,
-        num_workers=0,
-        generator=preference_generator,
-    )
+    preference_dataset = None
+    preference_loader = None
+    if config.preference_mode != "control":
+        preference_dataset = StateAlignedPreferenceDataset(
+            sequence_dataset=dataset,
+            state_keep_fraction=config.preference_state_keep_fraction,
+            good_quantile=config.preference_good_quantile,
+            bad_quantile=config.preference_bad_quantile,
+            timestep_bucket=config.preference_timestep_bucket,
+            num_pairs=config.preference_num_pairs,
+            num_candidates=config.preference_num_candidates,
+            pair_seed=config.preference_pair_seed,
+            pair_arrays_path=config.preference_arrays_path,
+            hardness_temperature=config.preference_hardness_temperature,
+            prioritized_sampling=config.prioritized_pair_sampling,
+            dynamic_priority_mix=config.dynamic_priority_mix,
+            dynamic_priority_ema=config.dynamic_priority_ema,
+        )
+        wandb.log(
+            {
+                f"preference_data/{key}": value
+                for key, value in preference_dataset.stats.items()
+            },
+            step=0,
+        )
+        preference_generator = torch.Generator()
+        preference_generator.manual_seed(config.preference_pair_seed)
+        preference_loader = DataLoader(
+            preference_dataset,
+            batch_size=config.preference_batch_size,
+            pin_memory=True,
+            num_workers=0,
+            generator=preference_generator,
+        )
 
     optim = torch.optim.AdamW(
         model.parameters(),
@@ -432,7 +560,9 @@ def train(config: SAPTrainConfig):
 
     start_step = 0
     if config.pretrained_checkpoint_path is not None:
-        checkpoint = torch.load(config.pretrained_checkpoint_path, map_location=config.device)
+        checkpoint = torch.load(
+            config.pretrained_checkpoint_path, map_location=config.device
+        )
         model.load_state_dict(checkpoint["model_state"])
         if "optimizer_state" in checkpoint:
             optim.load_state_dict(checkpoint["optimizer_state"])
@@ -449,13 +579,19 @@ def train(config: SAPTrainConfig):
             pyrallis.dump(config, file)
 
     print(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
-    print(f"Preference statistics: {preference_dataset.stats}")
+    if preference_dataset is not None:
+        print(f"Preference statistics: {preference_dataset.stats}")
     trainloader_iter = iter(trainloader)
-    preference_iter = iter(preference_loader)
+    preference_iter = (
+        iter(preference_loader) if preference_loader is not None else None
+    )
     reference_model = None
 
     for step in trange(start_step, config.update_steps, desc="Training"):
-        if step == config.preference_start_step:
+        if (
+            step == config.preference_start_step
+            and config.preference_mode != "control"
+        ):
             if config.reference_checkpoint_path is not None:
                 checkpoint_dir = os.path.dirname(config.reference_checkpoint_path) or "."
                 os.makedirs(checkpoint_dir, exist_ok=True)
@@ -471,7 +607,10 @@ def train(config: SAPTrainConfig):
                 temp_path = f"{config.reference_checkpoint_path}.tmp-{os.getpid()}"
                 torch.save(checkpoint, temp_path)
                 os.replace(temp_path, config.reference_checkpoint_path)
-                print(f"Saved reusable DT checkpoint: {config.reference_checkpoint_path}")
+                print(
+                    "Saved reusable DT checkpoint: "
+                    f"{config.reference_checkpoint_path}"
+                )
                 wandb.log({"checkpoint/saved_step": step}, step=step)
                 wandb.save(config.reference_checkpoint_path, base_path=checkpoint_dir)
             reference_model = copy.deepcopy(model).to(config.device)
@@ -500,11 +639,19 @@ def train(config: SAPTrainConfig):
         reference_loss = None
         preference_accuracy = None
         preference_active_ratio = None
+        preference_active_count = None
+        active_normalization_fallback = None
         pair_confidence_mean = None
         positive_error = None
         negative_error = None
+        target_mode = None
 
-        if step >= config.preference_start_step:
+        if (
+            step >= config.preference_start_step
+            and config.preference_mode != "control"
+        ):
+            assert preference_iter is not None
+            assert preference_dataset is not None
             preference_batch = [
                 item.to(config.device) for item in next(preference_iter)
             ]
@@ -518,12 +665,24 @@ def train(config: SAPTrainConfig):
                 target_index,
                 negative_actions,
                 pair_confidence,
+                pair_indices,
             ) = preference_batch
+            if config.target_aligned_preference:
+                preference_returns, target_mode = mix_preference_returns(
+                    recorded_returns=pref_returns,
+                    mask=pref_mask,
+                    reward_scale=config.reward_scale,
+                    recorded_fraction=config.recorded_target_fraction,
+                    target_return_low=config.preference_target_return_low,
+                    target_return_high=config.preference_target_return_high,
+                )
+            else:
+                preference_returns = pref_returns
             positive_prediction = predict_action(
                 model,
                 pref_states,
                 pref_actions,
-                pref_returns,
+                preference_returns,
                 pref_time_steps,
                 pref_mask,
                 target_index,
@@ -544,32 +703,57 @@ def train(config: SAPTrainConfig):
             if config.preference_mode == "hard_positive":
                 weighted_preference = pair_confidence * positive_error
                 preference_active_ratio = torch.ones_like(positive_error).mean()
+                preference_active_count = torch.tensor(
+                    positive_error.numel(), device=config.device
+                )
+                active_normalization_fallback = torch.zeros((), device=config.device)
             else:
+                active_pairs = margin_violation > 0
                 weighted_preference = pair_confidence * F.relu(margin_violation)
-                preference_active_ratio = (margin_violation > 0).float().mean()
-            preference_loss = (
-                weighted_preference.sum() / pair_confidence.sum().clamp_min(1e-6)
-            )
+                preference_active_ratio = active_pairs.float().mean()
+                preference_active_count = active_pairs.sum()
+                use_active_normalization = (
+                    config.active_only_normalization
+                    and preference_active_count.item()
+                    >= config.preference_min_active_pairs
+                )
+                if use_active_normalization:
+                    denominator = (
+                        pair_confidence * active_pairs.float()
+                    ).sum().clamp_min(1e-6)
+                    active_normalization_fallback = torch.zeros(
+                        (), device=config.device
+                    )
+                else:
+                    denominator = pair_confidence.sum().clamp_min(1e-6)
+                    active_normalization_fallback = torch.tensor(
+                        float(config.active_only_normalization), device=config.device
+                    )
+                preference_dataset.update_priorities(
+                    pair_indices,
+                    margin_violation,
+                    config.preference_margin,
+                )
+            if config.preference_mode == "hard_positive":
+                denominator = pair_confidence.sum().clamp_min(1e-6)
+            preference_loss = weighted_preference.sum() / denominator
             preference_accuracy = (positive_error < negative_error).float().mean()
             pair_confidence_mean = pair_confidence.mean()
 
-            anchor_returns = torch.full_like(
-                pref_returns,
-                config.reference_target_return * config.reward_scale,
-            )
-            anchor_returns = anchor_returns * pref_mask
-            anchor_prediction = predict_action(
-                model,
-                pref_states,
-                pref_actions,
-                anchor_returns,
-                pref_time_steps,
-                pref_mask,
-                target_index,
-            )
-            with torch.no_grad():
-                reference_prediction = predict_action(
-                    reference_model,
+            anchor_target_returns = [config.reference_target_return]
+            if config.target_aligned_preference:
+                anchor_target_returns = [
+                    config.preference_target_return_low,
+                    config.preference_target_return_high,
+                ]
+            reference_losses = []
+            for anchor_target_return in anchor_target_returns:
+                anchor_returns = torch.full_like(
+                    pref_returns,
+                    anchor_target_return * config.reward_scale,
+                ) * pref_mask
+                anchor_prediction = predict_action(
+                    model,
                     pref_states,
                     pref_actions,
                     anchor_returns,
@@ -577,7 +761,20 @@ def train(config: SAPTrainConfig):
                     pref_mask,
                     target_index,
                 )
-            reference_loss = F.mse_loss(anchor_prediction, reference_prediction)
+                with torch.no_grad():
+                    reference_prediction = predict_action(
+                        reference_model,
+                        pref_states,
+                        pref_actions,
+                        anchor_returns,
+                        pref_time_steps,
+                        pref_mask,
+                        target_index,
+                    )
+                reference_losses.append(
+                    F.mse_loss(anchor_prediction, reference_prediction)
+                )
+            reference_loss = torch.stack(reference_losses).mean()
             total_loss = (
                 dt_loss
                 + config.preference_weight * preference_loss
@@ -597,6 +794,7 @@ def train(config: SAPTrainConfig):
             "learning_rate": scheduler.get_last_lr()[0],
             "train/preference_active": float(
                 step >= config.preference_start_step
+                and config.preference_mode != "control"
             ),
         }
         if preference_loss is not None:
@@ -605,13 +803,33 @@ def train(config: SAPTrainConfig):
                     "train/preference_loss": preference_loss.item(),
                     "train/reference_loss": reference_loss.item(),
                     "train/preference_active_ratio": preference_active_ratio.item(),
-                    "train/preference_margin_violation": margin_violation.mean().item(),
+                    "train/preference_active_count": preference_active_count.item(),
+                    "train/active_normalization_fallback": (
+                        active_normalization_fallback.item()
+                    ),
+                    "train/preference_margin_violation": (
+                        margin_violation.mean().item()
+                    ),
                     "train/pair_confidence_mean": pair_confidence_mean.item(),
                     "train/preference_accuracy": preference_accuracy.item(),
                     "train/preference_positive_error": positive_error.mean().item(),
                     "train/preference_negative_error": negative_error.mean().item(),
                 }
             )
+            if target_mode is not None:
+                metrics.update(
+                    {
+                        "train/recorded_target_fraction": (
+                            (target_mode == 0).float().mean().item()
+                        ),
+                        "train/low_target_fraction": (
+                            (target_mode == 1).float().mean().item()
+                        ),
+                        "train/high_target_fraction": (
+                            (target_mode == 2).float().mean().item()
+                        ),
+                    }
+                )
         wandb.log(metrics, step=step)
 
         if step % config.eval_every == 0 or step == config.update_steps - 1:
