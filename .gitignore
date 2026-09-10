@@ -153,3 +153,9 @@ checkpoints/
 *.h5
 *.hdf5
 assets/
+
+# Local experiment artifacts and external checkouts
+/logs/
+/results/
+/third_party/
+*.orig
