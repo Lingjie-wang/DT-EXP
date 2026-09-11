@@ -362,8 +362,12 @@ def main() -> None:
 
     result_dir = Path(args.result_dir).resolve()
     result_dir.mkdir(parents=True, exist_ok=True)
-    result_path = result_dir / "dt_pair_diagnostic_halfcheetah_medium_replay_delayed_seed0.json"
-    arrays_path = result_dir / "dt_pair_diagnostic_halfcheetah_medium_replay_delayed_seed0.npz"
+    result_stem = (
+        "dt_pair_diagnostic_halfcheetah_medium_replay_delayed_"
+        f"seed{args.seed}"
+    )
+    result_path = result_dir / f"{result_stem}.json"
+    arrays_path = result_dir / f"{result_stem}.npz"
     with result_path.open("w", encoding="utf-8") as result_file:
         json.dump(summary, result_file, indent=2, sort_keys=True)
     np.savez_compressed(

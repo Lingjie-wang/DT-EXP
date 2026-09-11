@@ -41,3 +41,11 @@ The target-aligned runs sample recorded/6,000/12,000 RTG conditions in a
 falling back to the full batch when fewer than 16 pairs are active. Pair
 priorities are updated online with an EMA and mixed equally with frozen-DT
 hardness weights. The reference anchor is applied at both evaluation RTGs.
+
+Seed 1 uses the same staged protocol. Run
+`prepare_dt50k_pair_diagnostic_seed1.sbatch`, followed by
+`run_dt_pair_diagnostic_seed1.sbatch`. The control can start as soon as the
+checkpoint preparation succeeds; the target-aligned run starts after the pair
+diagnostic succeeds. Their entry points are
+`run_dt50k_control_to75k_delayed_hcmr_seed1.sbatch` and
+`run_target_aligned_hard_fork_v2_l005_delayed_hcmr_seed1.sbatch`.
