@@ -59,6 +59,7 @@ class SAPTrainConfig(TrainConfig):
     dynamic_priority_mix: float = 0.5
     dynamic_priority_ema: float = 0.9
     target_aligned_preference: bool = False
+    preference_target_mode: str = "mixed"
     recorded_target_fraction: float = 0.5
     preference_target_return_low: float = 6_000.0
     preference_target_return_high: float = 12_000.0
@@ -419,38 +420,54 @@ def mix_preference_returns(
     recorded_returns: torch.Tensor,
     mask: torch.Tensor,
     reward_scale: float,
+    target_mode: str,
     recorded_fraction: float,
     target_return_low: float,
     target_return_high: float,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Use recorded, low-target, and high-target RTGs with fixed proportions."""
-    if not 0.0 <= recorded_fraction <= 1.0:
-        raise ValueError("recorded_target_fraction must be in [0, 1]")
+    """Choose RTG conditions for the auxiliary preference branch only."""
+    if target_mode not in {"mixed", "high_only", "low_only"}:
+        raise ValueError(
+            "preference_target_mode must be one of mixed, high_only, low_only"
+        )
 
-    batch_size = recorded_returns.shape[0]
-    draw = torch.rand(batch_size, device=recorded_returns.device)
-    remaining_fraction = 1.0 - recorded_fraction
-    low_boundary = recorded_fraction + remaining_fraction / 2.0
-    target_mode = torch.zeros(
-        batch_size, dtype=torch.long, device=recorded_returns.device
-    )
-    target_mode[draw >= recorded_fraction] = 1
-    target_mode[draw >= low_boundary] = 2
-
-    mixed_returns = recorded_returns.clone()
     low_returns = torch.full_like(
         recorded_returns, target_return_low * reward_scale
     ) * mask
     high_returns = torch.full_like(
         recorded_returns, target_return_high * reward_scale
     ) * mask
+    batch_size = recorded_returns.shape[0]
+    if target_mode == "high_only":
+        return high_returns, torch.full(
+            (batch_size,), 2, dtype=torch.long, device=recorded_returns.device
+        )
+    if target_mode == "low_only":
+        return low_returns, torch.full(
+            (batch_size,), 1, dtype=torch.long, device=recorded_returns.device
+        )
+
+    # Preserve v2's recorded/low/high 50%/25%/25% behavior by default.
+    if not 0.0 <= recorded_fraction <= 1.0:
+        raise ValueError("recorded_target_fraction must be in [0, 1]")
+
+    draw = torch.rand(batch_size, device=recorded_returns.device)
+    remaining_fraction = 1.0 - recorded_fraction
+    low_boundary = recorded_fraction + remaining_fraction / 2.0
+    sampled_target_mode = torch.zeros(
+        batch_size, dtype=torch.long, device=recorded_returns.device
+    )
+    sampled_target_mode[draw >= recorded_fraction] = 1
+    sampled_target_mode[draw >= low_boundary] = 2
+
+    mixed_returns = recorded_returns.clone()
     mixed_returns = torch.where(
-        (target_mode == 1).unsqueeze(-1), low_returns, mixed_returns
+        (sampled_target_mode == 1).unsqueeze(-1), low_returns, mixed_returns
     )
     mixed_returns = torch.where(
-        (target_mode == 2).unsqueeze(-1), high_returns, mixed_returns
+        (sampled_target_mode == 2).unsqueeze(-1), high_returns, mixed_returns
     )
-    return mixed_returns, target_mode
+    return mixed_returns, sampled_target_mode
 
 
 @pyrallis.wrap()
@@ -471,6 +488,10 @@ def train(config: SAPTrainConfig):
         )
     if config.preference_min_active_pairs < 1:
         raise ValueError("preference_min_active_pairs must be positive")
+    if config.preference_target_mode not in {"mixed", "high_only", "low_only"}:
+        raise ValueError(
+            "preference_target_mode must be one of mixed, high_only, low_only"
+        )
     set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
     wandb_init(asdict(config))
 
@@ -672,6 +693,7 @@ def train(config: SAPTrainConfig):
                     recorded_returns=pref_returns,
                     mask=pref_mask,
                     reward_scale=config.reward_scale,
+                    target_mode=config.preference_target_mode,
                     recorded_fraction=config.recorded_target_fraction,
                     target_return_low=config.preference_target_return_low,
                     target_return_high=config.preference_target_return_high,
@@ -742,10 +764,15 @@ def train(config: SAPTrainConfig):
 
             anchor_target_returns = [config.reference_target_return]
             if config.target_aligned_preference:
-                anchor_target_returns = [
-                    config.preference_target_return_low,
-                    config.preference_target_return_high,
-                ]
+                if config.preference_target_mode == "high_only":
+                    anchor_target_returns = [config.preference_target_return_high]
+                elif config.preference_target_mode == "low_only":
+                    anchor_target_returns = [config.preference_target_return_low]
+                else:
+                    anchor_target_returns = [
+                        config.preference_target_return_low,
+                        config.preference_target_return_high,
+                    ]
             reference_losses = []
             for anchor_target_return in anchor_target_returns:
                 anchor_returns = torch.full_like(

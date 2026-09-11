@@ -42,6 +42,13 @@ falling back to the full batch when fewer than 16 pairs are active. Pair
 priorities are updated online with an EMA and mixed equally with frozen-DT
 hardness weights. The reference anchor is applied at both evaluation RTGs.
 
+`run_single_target_hard_fork_v3_high_delayed_hcmr_seed0.sbatch` is the
+single-target ablation. It leaves the base DT loss, pair data, preference
+weight, and 50k-to-75k budget unchanged, but applies every preference pair and
+the frozen-reference anchor only at RTG 12,000. Evaluation still reports both
+RTG 6,000 and 12,000, so the run directly tests whether the v2 target mixture
+caused a conditioning trade-off.
+
 Seed 1 uses the same staged protocol. Run
 `prepare_dt50k_pair_diagnostic_seed1.sbatch`, followed by
 `run_dt_pair_diagnostic_seed1.sbatch`. The control can start as soon as the
