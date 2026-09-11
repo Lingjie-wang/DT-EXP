@@ -49,3 +49,6 @@ checkpoint preparation succeeds; the target-aligned run starts after the pair
 diagnostic succeeds. Their entry points are
 `run_dt50k_control_to75k_delayed_hcmr_seed1.sbatch` and
 `run_target_aligned_hard_fork_v2_l005_delayed_hcmr_seed1.sbatch`.
+
+Seed 2 uses the same checkpoint preparation, diagnostic, control, and
+target-aligned entry points with `_seed2` suffixes.
