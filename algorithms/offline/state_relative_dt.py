@@ -100,7 +100,10 @@ class QualitySequenceDataset(IterableDataset):
         states = (states - self.state_mean) / self.state_std
         returns = returns * self.reward_scale
         mask = np.hstack(
-            [np.ones(states.shape[0]), np.zeros(self.seq_len - states.shape[0])]
+            [
+                np.ones(states.shape[0], dtype=np.float32),
+                np.zeros(self.seq_len - states.shape[0], dtype=np.float32),
+            ]
         )
         if states.shape[0] < self.seq_len:
             states = pad_along_axis(states, pad_to=self.seq_len)
