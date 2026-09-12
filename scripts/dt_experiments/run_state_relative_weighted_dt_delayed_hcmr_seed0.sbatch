@@ -9,7 +9,9 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=48G
-#SBATCH --time=18:00:00
+# The matched 50k-to-75k continuations complete in roughly two hours.  A
+# four-hour request is intentionally tight enough for GPUNorm backfilling.
+#SBATCH --time=04:00:00
 #SBATCH --output=/labmount/users/202615385/code/DT-EXP/logs/state-relative-weighted-dt-delayed-hcmr-seed0-%j.out
 
 set -euo pipefail
