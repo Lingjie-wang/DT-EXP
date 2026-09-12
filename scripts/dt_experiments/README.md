@@ -54,6 +54,10 @@ completed seed-one 50k checkpoint and seed-one pair diagnostic with the frozen
 v3-high configuration. Its existing DT-control and v2 counterparts provide the
 paired seed-one baselines.
 
+`run_single_target_hard_fork_v3_high_delayed_hcmr_seed2.sbatch` uses the same
+frozen v3-high configuration with the completed seed-two checkpoint and pair
+diagnostic, completing the three-seed comparison.
+
 Seed 1 uses the same staged protocol. Run
 `prepare_dt50k_pair_diagnostic_seed1.sbatch`, followed by
 `run_dt_pair_diagnostic_seed1.sbatch`. The control can start as soon as the
