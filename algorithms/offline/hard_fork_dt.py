@@ -63,6 +63,10 @@ class SAPTrainConfig(TrainConfig):
     recorded_target_fraction: float = 0.5
     preference_target_return_low: float = 6_000.0
     preference_target_return_high: float = 12_000.0
+    # "mse" reproduces the v1-v3 reference anchor exactly.  "trust_region"
+    # permits local preference corrections until action MSE exceeds tolerance.
+    reference_anchor_mode: str = "mse"
+    reference_tolerance: float = 0.0
     reference_checkpoint_path: Optional[str] = None
     pretrained_checkpoint_path: Optional[str] = None
 
@@ -492,6 +496,12 @@ def train(config: SAPTrainConfig):
         raise ValueError(
             "preference_target_mode must be one of mixed, high_only, low_only"
         )
+    if config.reference_anchor_mode not in {"mse", "trust_region"}:
+        raise ValueError(
+            "reference_anchor_mode must be one of mse, trust_region"
+        )
+    if config.reference_tolerance < 0.0:
+        raise ValueError("reference_tolerance must be non-negative")
     set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
     wandb_init(asdict(config))
 
@@ -666,6 +676,8 @@ def train(config: SAPTrainConfig):
         positive_error = None
         negative_error = None
         target_mode = None
+        reference_deviation = None
+        reference_violation_ratio = None
 
         if (
             step >= config.preference_start_step
@@ -774,6 +786,8 @@ def train(config: SAPTrainConfig):
                         config.preference_target_return_high,
                     ]
             reference_losses = []
+            reference_deviations = []
+            reference_violation_ratios = []
             for anchor_target_return in anchor_target_returns:
                 anchor_returns = torch.full_like(
                     pref_returns,
@@ -798,10 +812,34 @@ def train(config: SAPTrainConfig):
                         pref_mask,
                         target_index,
                     )
-                reference_losses.append(
-                    F.mse_loss(anchor_prediction, reference_prediction)
-                )
+                if config.reference_anchor_mode == "mse":
+                    # Preserve v1-v3 behavior exactly for the default anchor.
+                    anchor_loss = F.mse_loss(anchor_prediction, reference_prediction)
+                    reference_losses.append(anchor_loss)
+                    reference_deviations.append(anchor_loss.detach())
+                    reference_violation_ratios.append(
+                        torch.ones((), device=config.device)
+                    )
+                else:
+                    # Penalize only deviations outside a local action-space
+                    # trust region, leaving small preference corrections free.
+                    action_deviation = F.mse_loss(
+                        anchor_prediction,
+                        reference_prediction,
+                        reduction="none",
+                    ).mean(dim=-1)
+                    reference_losses.append(
+                        F.relu(action_deviation - config.reference_tolerance).mean()
+                    )
+                    reference_deviations.append(action_deviation.mean().detach())
+                    reference_violation_ratios.append(
+                        (action_deviation > config.reference_tolerance)
+                        .float()
+                        .mean()
+                    )
             reference_loss = torch.stack(reference_losses).mean()
+            reference_deviation = torch.stack(reference_deviations).mean()
+            reference_violation_ratio = torch.stack(reference_violation_ratios).mean()
             total_loss = (
                 dt_loss
                 + config.preference_weight * preference_loss
@@ -829,6 +867,10 @@ def train(config: SAPTrainConfig):
                 {
                     "train/preference_loss": preference_loss.item(),
                     "train/reference_loss": reference_loss.item(),
+                    "train/reference_deviation": reference_deviation.item(),
+                    "train/reference_violation_ratio": (
+                        reference_violation_ratio.item()
+                    ),
                     "train/preference_active_ratio": preference_active_ratio.item(),
                     "train/preference_active_count": preference_active_count.item(),
                     "train/active_normalization_fallback": (
