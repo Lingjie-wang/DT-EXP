@@ -14,20 +14,18 @@ import numpy as np
 import pyrallis
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, IterableDataset
-from tqdm.auto import trange
-
 import wandb
 from dt import (
     DecisionTransformer,
-    SequenceDataset,
-    TrainConfig,
     eval_rollout,
+    SequenceDataset,
     set_seed,
+    TrainConfig,
     wandb_init,
     wrap_env,
 )
-
+from torch.utils.data import DataLoader, IterableDataset
+from tqdm.auto import trange
 
 @dataclass
 class SAPTrainConfig(TrainConfig):

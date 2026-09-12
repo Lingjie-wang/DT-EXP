@@ -25,20 +25,18 @@ import pyrallis
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from tqdm.auto import trange
-
 import wandb
 from dt import (
     DecisionTransformer,
-    SequenceDataset,
-    TrainConfig,
     eval_rollout,
+    SequenceDataset,
     set_seed,
+    TrainConfig,
     wandb_init,
     wrap_env,
 )
-
+from torch.utils.data import DataLoader
+from tqdm.auto import trange
 
 @dataclass
 class TrajectoryAdvantageTrainConfig(TrainConfig):
@@ -288,7 +286,9 @@ def train(config: TrajectoryAdvantageTrainConfig):
         lambda steps: min((steps + 1) / config.warmup_steps, 1),
     )
 
-    checkpoint = torch.load(config.pretrained_checkpoint_path, map_location=config.device)
+    checkpoint = torch.load(
+        config.pretrained_checkpoint_path, map_location=config.device
+    )
     model.load_state_dict(checkpoint["model_state"])
     if "optimizer_state" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
@@ -434,7 +434,9 @@ def train(config: TrajectoryAdvantageTrainConfig):
                 "value_target_std": target_std,
                 "next_step": config.update_steps,
             },
-            os.path.join(config.checkpoints_path, "trajectory_advantage_dt_checkpoint.pt"),
+            os.path.join(
+                config.checkpoints_path, "trajectory_advantage_dt_checkpoint.pt"
+            ),
         )
     wandb.finish()
 

@@ -23,10 +23,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import wandb
-
 from dt import DecisionTransformer, SequenceDataset, set_seed
-from sap_dt_one_sided import StateAlignedPreferenceDataset, predict_action
-
+from sap_dt_one_sided import predict_action, StateAlignedPreferenceDataset
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -170,29 +168,47 @@ def main() -> None:
         bad_trajectory = trajectories[int(bad_traj)]
         good_step, bad_step = int(good_step), int(bad_step)
 
-        good_state = (good_trajectory["observations"][good_step] - state_mean) / state_std
-        bad_state = (bad_trajectory["observations"][bad_step] - state_mean) / state_std
-        current_state_rmse[pair_index] = np.sqrt(np.square(good_state - bad_state).mean())
+        good_state = (
+            good_trajectory["observations"][good_step] - state_mean
+        ) / state_std
+        bad_state = (
+            bad_trajectory["observations"][bad_step] - state_mean
+        ) / state_std
+        current_state_rmse[pair_index] = np.sqrt(
+            np.square(good_state - bad_state).mean()
+        )
 
         state_steps = min(args.prefix_length, good_step + 1, bad_step + 1)
-        good_states = good_trajectory["observations"][good_step - state_steps + 1 : good_step + 1]
-        bad_states = bad_trajectory["observations"][bad_step - state_steps + 1 : bad_step + 1]
+        good_states = good_trajectory["observations"][
+            good_step - state_steps + 1 : good_step + 1
+        ]
+        bad_states = bad_trajectory["observations"][
+            bad_step - state_steps + 1 : bad_step + 1
+        ]
         good_states = (good_states - state_mean) / state_std
         bad_states = (bad_states - state_mean) / state_std
-        prefix_state_rmse[pair_index] = np.sqrt(np.square(good_states - bad_states).mean())
+        prefix_state_rmse[pair_index] = np.sqrt(
+            np.square(good_states - bad_states).mean()
+        )
         prefix_steps[pair_index] = state_steps
 
         action_steps = min(max(args.prefix_length - 1, 0), good_step, bad_step)
         if action_steps:
-            good_actions = good_trajectory["actions"][good_step - action_steps : good_step]
-            bad_actions = bad_trajectory["actions"][bad_step - action_steps : bad_step]
+            good_actions = good_trajectory["actions"][
+                good_step - action_steps : good_step
+            ]
+            bad_actions = bad_trajectory["actions"][
+                bad_step - action_steps : bad_step
+            ]
             prefix_action_rmse[pair_index] = np.sqrt(
                 np.square(good_actions - bad_actions).mean()
             )
 
         good_action = good_trajectory["actions"][good_step]
         bad_action = bad_trajectory["actions"][bad_step]
-        target_action_rmse[pair_index] = np.sqrt(np.square(good_action - bad_action).mean())
+        target_action_rmse[pair_index] = np.sqrt(
+            np.square(good_action - bad_action).mean()
+        )
         return_gap[pair_index] = (
             trajectory_returns[int(good_traj)] - trajectory_returns[int(bad_traj)]
         )
@@ -352,7 +368,9 @@ def main() -> None:
         "distributions": {
             "current_state_rmse": percentiles(current_state_rmse),
             "prefix_state_rmse": percentiles(prefix_state_rmse),
-            "prefix_action_rmse": percentiles(prefix_action_rmse[np.isfinite(prefix_action_rmse)]),
+            "prefix_action_rmse": percentiles(
+                prefix_action_rmse[np.isfinite(prefix_action_rmse)]
+            ),
             "target_action_rmse": percentiles(target_action_rmse),
             "return_gap": percentiles(return_gap),
             "timestep_gap": percentiles(timestep_gap.astype(np.float32)),

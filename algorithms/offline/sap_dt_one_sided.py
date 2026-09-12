@@ -17,20 +17,18 @@ import numpy as np
 import pyrallis
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, IterableDataset
-from tqdm.auto import trange
-
 import wandb
 from dt import (
     DecisionTransformer,
-    SequenceDataset,
-    TrainConfig,
     eval_rollout,
+    SequenceDataset,
     set_seed,
+    TrainConfig,
     wandb_init,
     wrap_env,
 )
-
+from torch.utils.data import DataLoader, IterableDataset
+from tqdm.auto import trange
 
 @dataclass
 class SAPTrainConfig(TrainConfig):
@@ -360,7 +358,9 @@ def train(config: SAPTrainConfig):
 
     start_step = 0
     if config.pretrained_checkpoint_path is not None:
-        checkpoint = torch.load(config.pretrained_checkpoint_path, map_location=config.device)
+        checkpoint = torch.load(
+            config.pretrained_checkpoint_path, map_location=config.device
+        )
         model.load_state_dict(checkpoint["model_state"])
         if "optimizer_state" in checkpoint:
             optim.load_state_dict(checkpoint["optimizer_state"])
@@ -399,7 +399,10 @@ def train(config: SAPTrainConfig):
                 temp_path = f"{config.reference_checkpoint_path}.tmp-{os.getpid()}"
                 torch.save(checkpoint, temp_path)
                 os.replace(temp_path, config.reference_checkpoint_path)
-                print(f"Saved reusable DT checkpoint: {config.reference_checkpoint_path}")
+                print(
+                    "Saved reusable DT checkpoint: "
+                    f"{config.reference_checkpoint_path}"
+                )
                 wandb.log({"checkpoint/saved_step": step}, step=step)
                 wandb.save(config.reference_checkpoint_path, base_path=checkpoint_dir)
             reference_model = copy.deepcopy(model).to(config.device)

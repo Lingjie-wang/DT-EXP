@@ -11,15 +11,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Python 3.9
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.9"
-      - name: Install dependencies
+      # This workflow checks only formatting. Installing the full GPU, MuJoCo,
+      # and D4RL stack made the check fail before Ruff was ever invoked.
+      - name: Install Ruff
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements/requirements_dev.txt
+          python -m pip install ruff==0.0.278
       - name: check codestyle
         run: |
           ruff --config pyproject.toml --diff .
