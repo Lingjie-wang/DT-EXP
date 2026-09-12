@@ -45,7 +45,8 @@ python algorithms/offline/state_relative_dt.py \
   --quality_target_return 12000.0 \
   --quality_aux_batch_size 1024 \
   --state_neighbor_count 64 \
-  --state_neighbor_candidate_multiplier 4 \
-  --state_knn_chunk_size 4096 \
+  --state_projection_bits 8 \
+  --state_neighbor_query_chunk_size 256 \
+  --state_neighbor_seed 91731 \
   --pretrained_checkpoint_path "${PROJECT}/checkpoints/dt-halfcheetah-medium-replay-v2-delayed-seed0-step50000.pt" \
   --checkpoints_path "${PROJECT}/checkpoints/state-relative-weighted-dt-delayed-hcmr-seed0"

@@ -52,8 +52,9 @@ class StateRelativeTrainConfig(TrainConfig):
     quality_target_return: float = 12_000.0
     quality_aux_batch_size: int = 1_024
     state_neighbor_count: int = 64
-    state_neighbor_candidate_multiplier: int = 4
-    state_knn_chunk_size: int = 4_096
+    state_projection_bits: int = 8
+    state_neighbor_query_chunk_size: int = 256
+    state_neighbor_seed: int = 91_731
 
 
 class QualitySequenceDataset(IterableDataset):
@@ -188,73 +189,109 @@ def build_state_relative_quality_mask(
 ) -> Tuple[np.ndarray, Dict[str, float]]:
     """Select transitions with top local outcome advantages.
 
-    A KD-tree retrieves nearby normalized states.  Neighbors from the same
-    trajectory are excluded so that a trajectory cannot label its own adjacent
-    states as evidence.  Candidate queries are chunked to keep memory bounded.
+    Random-projection buckets provide local candidate sets without adding a
+    dependency to the experiment environment.  Exact squared distances choose
+    the nearest cross-trajectory states inside each bucket.  Neighbor states
+    from the same trajectory are excluded so a trajectory cannot label its own
+    adjacent states as evidence.
     """
-
-    try:
-        from scipy.spatial import cKDTree
-    except ImportError as error:
-        raise ImportError(
-            "state_relative quality labels require scipy.spatial.cKDTree"
-        ) from error
 
     num_transitions = len(states)
     neighbor_count = config.state_neighbor_count
-    candidate_count = min(
-        num_transitions,
-        max(
-            neighbor_count + 1,
-            neighbor_count * config.state_neighbor_candidate_multiplier,
-        ),
-    )
-    if candidate_count <= neighbor_count:
-        raise ValueError("not enough transitions to find cross-trajectory neighbors")
+    if config.state_projection_bits < 1:
+        raise ValueError("state_projection_bits must be positive")
+    if config.state_projection_bits > 16:
+        raise ValueError("state_projection_bits must be at most 16")
 
-    tree = cKDTree(states)
+    projection_rng = np.random.default_rng(config.state_neighbor_seed)
+    projections = projection_rng.standard_normal(
+        (states.shape[1], config.state_projection_bits)
+    ).astype(np.float32)
+    projection_signs = (states @ projections) >= 0.0
+    bit_values = 1 << np.arange(config.state_projection_bits, dtype=np.int64)
+    bucket_codes = projection_signs.astype(np.int64) @ bit_values
+    sorted_indices = np.argsort(bucket_codes, kind="stable")
+    sorted_codes = bucket_codes[sorted_indices]
+    bucket_starts = np.r_[0, np.flatnonzero(np.diff(sorted_codes)) + 1]
+    bucket_ends = np.r_[bucket_starts[1:], num_transitions]
+
+    # Only rare, undersized buckets use this fallback.  It keeps the method
+    # defined for every transition while the recorded fallback fraction tells
+    # us whether the local-bucket approximation was sufficiently selective.
+    fallback_size = min(num_transitions, max(4_096, neighbor_count * 8))
+    fallback_indices = np.linspace(
+        0, num_transitions - 1, num=fallback_size, dtype=np.int64
+    )
     local_advantages = np.empty(num_transitions, dtype=np.float32)
     neighbor_counts = np.empty(num_transitions, dtype=np.int32)
     neighbor_distances = np.empty(num_transitions, dtype=np.float32)
+    used_fallback = np.zeros(num_transitions, dtype=bool)
 
-    for start_idx in range(0, num_transitions, config.state_knn_chunk_size):
-        end_idx = min(start_idx + config.state_knn_chunk_size, num_transitions)
-        query_states = states[start_idx:end_idx]
-        try:
-            distances, neighbor_indices = tree.query(
-                query_states, k=candidate_count, workers=-1
-            )
-        except TypeError:
-            # SciPy versions before 1.6 do not expose the workers argument.
-            distances, neighbor_indices = tree.query(query_states, k=candidate_count)
-
-        if candidate_count == 1:
-            distances = distances[:, None]
-            neighbor_indices = neighbor_indices[:, None]
-        candidate_trajectory_ids = trajectory_ids[neighbor_indices]
-        other_trajectory = candidate_trajectory_ids != trajectory_ids[
-            start_idx:end_idx, None
-        ]
-        other_rank = np.cumsum(other_trajectory, axis=1)
-        keep = other_trajectory & (other_rank <= neighbor_count)
-        counts = keep.sum(axis=1)
-        if np.any(counts == 0):
-            raise RuntimeError("a transition has no cross-trajectory neighbors")
-
-        neighbor_outcomes = outcomes[neighbor_indices]
-        masked_outcomes = np.where(keep, neighbor_outcomes, 0.0)
-        local_means = masked_outcomes.sum(axis=1) / counts
-        centered = neighbor_outcomes - local_means[:, None]
-        local_variances = np.where(keep, centered * centered, 0.0).sum(axis=1)
-        local_variances = local_variances / counts
-        local_stds = np.sqrt(np.maximum(local_variances, 1e-6))
-        local_advantages[start_idx:end_idx] = (
-            outcomes[start_idx:end_idx] - local_means
-        ) / local_stds
-        neighbor_counts[start_idx:end_idx] = counts
-        neighbor_distances[start_idx:end_idx] = (
-            np.where(keep, distances, 0.0).sum(axis=1) / counts
+    for bucket_start, bucket_end in zip(bucket_starts, bucket_ends):
+        bucket_indices = sorted_indices[bucket_start:bucket_end]
+        bucket_trajectory_ids = trajectory_ids[bucket_indices]
+        _, inverse_trajectory_ids, trajectory_counts = np.unique(
+            bucket_trajectory_ids, return_inverse=True, return_counts=True
         )
+        cross_trajectory_counts = (
+            len(bucket_indices) - trajectory_counts[inverse_trajectory_ids]
+        )
+        needs_fallback = cross_trajectory_counts < neighbor_count
+        if np.any(needs_fallback):
+            candidate_indices = np.unique(
+                np.concatenate([bucket_indices, fallback_indices])
+            )
+            used_fallback[bucket_indices[needs_fallback]] = True
+        else:
+            candidate_indices = bucket_indices
+
+        candidate_states = states[candidate_indices]
+        candidate_norms = np.sum(candidate_states * candidate_states, axis=1)
+        candidate_trajectory_ids = trajectory_ids[candidate_indices]
+        candidate_outcomes = outcomes[candidate_indices]
+
+        for query_start in range(
+            0, len(bucket_indices), config.state_neighbor_query_chunk_size
+        ):
+            query_end = min(
+                query_start + config.state_neighbor_query_chunk_size,
+                len(bucket_indices),
+            )
+            query_indices = bucket_indices[query_start:query_end]
+            query_states = states[query_indices]
+            query_norms = np.sum(query_states * query_states, axis=1, keepdims=True)
+            squared_distances = (
+                query_norms
+                + candidate_norms[None, :]
+                - 2.0 * query_states @ candidate_states.T
+            )
+            squared_distances = np.maximum(squared_distances, 0.0)
+            same_trajectory = candidate_trajectory_ids[None, :] == trajectory_ids[
+                query_indices, None
+            ]
+            squared_distances[same_trajectory] = np.inf
+            available_counts = (~same_trajectory).sum(axis=1)
+            if np.any(available_counts < neighbor_count):
+                raise RuntimeError(
+                    "a transition has too few cross-trajectory neighbors"
+                )
+
+            nearest_columns = np.argpartition(
+                squared_distances, kth=neighbor_count - 1, axis=1
+            )[:, :neighbor_count]
+            nearest_distances = np.take_along_axis(
+                squared_distances, nearest_columns, axis=1
+            )
+            nearest_outcomes = candidate_outcomes[nearest_columns]
+            local_means = nearest_outcomes.mean(axis=1)
+            local_stds = np.sqrt(
+                np.maximum(nearest_outcomes.var(axis=1), 1e-6)
+            )
+            local_advantages[query_indices] = (
+                outcomes[query_indices] - local_means
+            ) / local_stds
+            neighbor_counts[query_indices] = neighbor_count
+            neighbor_distances[query_indices] = np.sqrt(nearest_distances).mean(axis=1)
 
     threshold = float(np.quantile(local_advantages, 1.0 - config.quality_fraction))
     selected = local_advantages >= threshold
@@ -270,7 +307,12 @@ def build_state_relative_quality_mask(
         "quality/neighbor_count_mean": float(neighbor_counts.mean()),
         "quality/neighbor_count_min": float(neighbor_counts.min()),
         "quality/neighbor_distance_mean": float(neighbor_distances.mean()),
-        "quality/neighbor_candidates": float(candidate_count),
+        "quality/projection_bits": float(config.state_projection_bits),
+        "quality/projection_bucket_count": float(len(bucket_starts)),
+        "quality/projection_bucket_max_size": float(
+            np.diff(np.r_[bucket_starts, num_transitions]).max()
+        ),
+        "quality/fallback_transition_fraction": float(used_fallback.mean()),
     }
 
 
@@ -342,10 +384,10 @@ def train(config: StateRelativeTrainConfig):
         raise ValueError("quality_aux_batch_size must be in [1, batch_size]")
     if config.state_neighbor_count < 1:
         raise ValueError("state_neighbor_count must be positive")
-    if config.state_neighbor_candidate_multiplier < 2:
-        raise ValueError("state_neighbor_candidate_multiplier must be at least 2")
-    if config.state_knn_chunk_size < 1:
-        raise ValueError("state_knn_chunk_size must be positive")
+    if not 1 <= config.state_projection_bits <= 16:
+        raise ValueError("state_projection_bits must be in [1, 16]")
+    if config.state_neighbor_query_chunk_size < 1:
+        raise ValueError("state_neighbor_query_chunk_size must be positive")
 
     set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
     wandb_init(asdict(config))
