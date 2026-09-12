@@ -49,6 +49,11 @@ the frozen-reference anchor only at RTG 12,000. Evaluation still reports both
 RTG 6,000 and 12,000, so the run directly tests whether the v2 target mixture
 caused a conditioning trade-off.
 
+`run_single_target_hard_fork_v3_high_delayed_hcmr_seed1.sbatch` reuses the
+completed seed-one 50k checkpoint and seed-one pair diagnostic with the frozen
+v3-high configuration. Its existing DT-control and v2 counterparts provide the
+paired seed-one baselines.
+
 Seed 1 uses the same staged protocol. Run
 `prepare_dt50k_pair_diagnostic_seed1.sbatch`, followed by
 `run_dt_pair_diagnostic_seed1.sbatch`. The control can start as soon as the
