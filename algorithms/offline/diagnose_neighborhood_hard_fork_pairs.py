@@ -10,6 +10,10 @@ comparisons to justify an ablation:
 3. score them with the frozen 50k delayed DT at RTG=12000;
 4. count pairs that still violate v3-high's action margin.
 
+For a follow-up ablation, the script also exports only the margin-active pairs
+in the exact four-column format consumed by ``hard_fork_dt.py``.  The export is
+data preparation only; this script never updates a model.
+
 The nearest-neighbor search uses deterministic random-projection buckets and
 exact distances within each bucket.  It requires only NumPy, matching the
 server environment.
@@ -433,6 +437,72 @@ def score_pairs(
     return positive_errors, negative_errors
 
 
+def export_margin_active_pairs(
+    result_dir: Path,
+    result_stem: str,
+    pairs: np.ndarray,
+    active: np.ndarray,
+    trajectory_ids: np.ndarray,
+    timesteps: np.ndarray,
+    positive_error: np.ndarray,
+    negative_error: np.ndarray,
+    margin_violation: np.ndarray,
+    pair_diagnostics: Dict[str, np.ndarray],
+    checkpoint_sha256: str,
+    args: argparse.Namespace,
+) -> Tuple[Path, Dict[str, float]]:
+    """Export frozen-margin-active pairs in hard_fork_dt's legacy NPZ schema."""
+
+    active_indices = np.flatnonzero(active)
+    if len(active_indices) == 0:
+        raise RuntimeError("No frozen-margin-active pair is available for export")
+
+    active_flat_pairs = pairs[active_indices]
+    hard_fork_pairs = np.stack(
+        [
+            trajectory_ids[active_flat_pairs[:, 0]],
+            timesteps[active_flat_pairs[:, 0]],
+            trajectory_ids[active_flat_pairs[:, 1]],
+            timesteps[active_flat_pairs[:, 1]],
+        ],
+        axis=1,
+    ).astype(np.int32)
+    active_state_rmse = pair_diagnostics["state_rmse"][active_indices]
+    confidence_scale = max(float(np.median(active_state_rmse)), 1e-6)
+    pair_confidence = np.exp(-active_state_rmse / confidence_scale).astype(
+        np.float32
+    )
+    output_path = result_dir / f"{result_stem}_margin_active_pairs.npz"
+    np.savez_compressed(
+        output_path,
+        pairs=hard_fork_pairs,
+        valid_branch=np.ones(len(active_indices), dtype=bool),
+        hard_pair=np.ones(len(active_indices), dtype=bool),
+        pair_confidence=pair_confidence,
+        positive_error=positive_error[active_indices],
+        negative_error=negative_error[active_indices],
+        source_margin_violation=margin_violation[active_indices],
+        source_flat_pair_indices=active_indices.astype(np.int32),
+        source_state_rmse=active_state_rmse,
+        source_return_gap=pair_diagnostics["return_gap"][active_indices],
+        source_action_rmse=pair_diagnostics["action_rmse"][active_indices],
+        source_timestep_gap=pair_diagnostics["timestep_gap"][active_indices],
+        source_checkpoint_sha256=np.asarray(checkpoint_sha256),
+        source_target_return=np.asarray(args.target_return, dtype=np.float32),
+        source_preference_margin=np.asarray(
+            args.preference_margin, dtype=np.float32
+        ),
+    )
+    stats = {
+        "exported_margin_active_pairs": float(len(active_indices)),
+        "confidence_scale_state_rmse": confidence_scale,
+        "pair_confidence_mean": float(pair_confidence.mean()),
+        "pair_confidence_min": float(pair_confidence.min()),
+        "pair_confidence_max": float(pair_confidence.max()),
+    }
+    return output_path, stats
+
+
 def main() -> None:
     args = parse_args()
     if args.reward_mode != "delayed":
@@ -486,10 +556,29 @@ def main() -> None:
     wrong = positive_error >= negative_error
     clear_correct = margin_violation <= 0.0
 
+    result_dir = Path(args.result_dir).resolve()
+    result_dir.mkdir(parents=True, exist_ok=True)
+    result_stem = "neighborhood_hard_fork_diagnostic_hcmr_delayed_seed" f"{args.seed}"
+    checkpoint_sha256 = sha256(checkpoint_path)
+    active_pairs_path, active_pair_stats = export_margin_active_pairs(
+        result_dir=result_dir,
+        result_stem=result_stem,
+        pairs=pairs,
+        active=active,
+        trajectory_ids=trajectory_ids,
+        timesteps=timesteps,
+        positive_error=positive_error,
+        negative_error=negative_error,
+        margin_violation=margin_violation,
+        pair_diagnostics=pair_diagnostics,
+        checkpoint_sha256=checkpoint_sha256,
+        args=args,
+    )
+
     summary = {
         "checkpoint": {
             "path": str(checkpoint_path),
-            "sha256": sha256(checkpoint_path),
+            "sha256": checkpoint_sha256,
             "next_step": int(checkpoint.get("next_step", -1)),
         },
         "dataset": {
@@ -526,11 +615,12 @@ def main() -> None:
             "negative_error": percentiles(negative_error),
             "margin_violation": percentiles(margin_violation),
         },
+        "hard_fork_margin_active_export": {
+            "path": str(active_pairs_path),
+            **active_pair_stats,
+        },
     }
 
-    result_dir = Path(args.result_dir).resolve()
-    result_dir.mkdir(parents=True, exist_ok=True)
-    result_stem = "neighborhood_hard_fork_diagnostic_hcmr_delayed_seed" f"{args.seed}"
     summary_path = result_dir / f"{result_stem}.json"
     arrays_path = result_dir / f"{result_stem}.npz"
     with summary_path.open("w", encoding="utf-8") as summary_file:
