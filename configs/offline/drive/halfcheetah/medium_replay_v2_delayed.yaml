@@ -1,0 +1,50 @@
+# DRIVE (Cui et al., ICML 2026) adapted to this repository's delayed-reward
+# D4RL protocol.  Policy and critic use the paper's reported D4RL architecture
+# and optimizer settings; M, L, and K are not specified in the paper, so their
+# compact values are explicitly recorded here for reproducibility.
+project: corl-ddr
+group: DRIVE-HCMR-delayed-seed0
+name: DRIVE-HCMR-delayed-seed0
+env_name: halfcheetah-medium-replay-v2
+reward_mode: delayed
+train_seed: 0
+eval_seed: 42
+device: cuda:0
+embedding_dim: 128
+num_layers: 3
+num_heads: 1
+seq_len: 20
+episode_len: 1000
+attention_dropout: 0.1
+residual_dropout: 0.1
+embedding_dropout: 0.1
+max_action: 1.0
+gmm_components: 5
+gmm_log_std_min: -5.0
+gmm_log_std_max: 2.0
+policy_learning_rate: 0.0001
+policy_weight_decay: 0.0001
+policy_batch_size: 64
+policy_update_steps: 100000
+warmup_steps: 10000
+clip_grad: 0.25
+critic_learning_rate: 0.0003
+critic_batch_size: 256
+critic_update_steps: 100000
+critic_hidden_dim: 256
+critic_num_hidden: 2
+discount: 0.99
+expectile: 0.7
+target_tau: 0.005
+generated_candidates: 32
+retrieval_pool_size: 27
+retrieved_candidates: 9
+retrieval_zero_rtg_epsilon: 0.00000001
+index_batch_size: 256
+reward_scale: 0.001
+num_workers: 4
+target_returns: [12000.0, 6000.0]
+eval_episodes: 100
+eval_every: 5000
+checkpoints_path: /labmount/users/202615385/code/DT-EXP/checkpoints/drive-hcmr-delayed-seed0
+deterministic_torch: false
