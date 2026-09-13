@@ -28,17 +28,16 @@ import torch.nn.functional as F
 import wandb
 from dt import (
     DecisionTransformer,
-    SequenceDataset,
-    TrainConfig,
     eval_rollout,
     pad_along_axis,
+    SequenceDataset,
     set_seed,
+    TrainConfig,
     wandb_init,
     wrap_env,
 )
 from torch.utils.data import DataLoader, IterableDataset
 from tqdm.auto import trange
-
 
 @dataclass
 class StateRelativeTrainConfig(TrainConfig):
