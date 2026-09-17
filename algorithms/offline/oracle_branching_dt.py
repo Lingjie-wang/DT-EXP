@@ -12,7 +12,6 @@ import copy
 import csv
 import json
 import os
-import random
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -23,10 +22,8 @@ import d4rl  # noqa: F401
 import gym
 import numpy as np
 import torch
-from tqdm.auto import tqdm
-
 from dt import DecisionTransformer, get_d4rl_dataset, validate_reward_mode, wrap_env
-
+from tqdm.auto import tqdm
 
 @dataclass
 class EnvSnapshot:
@@ -79,7 +76,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--target-return", type=float, default=12000.0)
-    parser.add_argument("--reward-mode", choices=("original", "delayed"), default="delayed")
+    parser.add_argument(
+        "--reward-mode", choices=("original", "delayed"), default="delayed"
+    )
     parser.add_argument("--eval-seed", type=int, default=42)
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--anchors-per-episode", type=int, default=10)
@@ -181,13 +180,17 @@ def restore_env_snapshot(env: gym.Env, snapshot: EnvSnapshot) -> None:
         wrapper_by_depth[depth]._elapsed_steps = int(elapsed_steps)
 
     restore_rng_state(getattr(unwrapped, "np_random", None), snapshot.env_rng_state)
-    restore_rng_state(getattr(env.action_space, "np_random", None), snapshot.action_rng_state)
+    restore_rng_state(
+        getattr(env.action_space, "np_random", None), snapshot.action_rng_state
+    )
 
 
-def build_model(checkpoint: Dict[str, Any], device: str) -> Tuple[DecisionTransformer, Dict[str, Any]]:
+def build_model(
+    checkpoint: Dict[str, Any], device: str
+) -> Tuple[DecisionTransformer, Dict[str, Any]]:
     config = dict(checkpoint["config"])
     state_mean = np.asarray(checkpoint["state_mean"], dtype=np.float32)
-    state_std = np.asarray(checkpoint["state_std"], dtype=np.float32)
+    np.asarray(checkpoint["state_std"], dtype=np.float32)
     state_dim = int(state_mean.shape[-1])
 
     action_dim = checkpoint["model_state"]["action_head.0.weight"].shape[0]
@@ -272,7 +275,9 @@ def update_policy_tensors(
     reward_scaled: float,
     reward_mode: str,
 ) -> None:
-    actions[:, step] = torch.as_tensor(action, dtype=torch.float32, device=actions.device)
+    actions[:, step] = torch.as_tensor(
+        action, dtype=torch.float32, device=actions.device
+    )
     states[:, step + 1] = torch.as_tensor(
         next_state, dtype=torch.float32, device=states.device
     )
@@ -751,12 +756,16 @@ def main() -> None:
                     all_rows.append(base_row)
 
                     for candidate_id, direction in enumerate(directions, start=1):
-                        candidate_raw = action_base + float(alpha) * local_std * direction
-                        candidate = np.clip(candidate_raw, action_low, action_high).astype(
-                            np.float32
+                        candidate_raw = (
+                            action_base + float(alpha) * local_std * direction
                         )
+                        candidate = np.clip(
+                            candidate_raw, action_low, action_high
+                        ).astype(np.float32)
                         was_clipped = int(
-                            not np.allclose(candidate_raw, candidate, rtol=0.0, atol=1e-8)
+                            not np.allclose(
+                                candidate_raw, candidate, rtol=0.0, atol=1e-8
+                            )
                         )
                         result = branch_rollout(
                             env=eval_env,
