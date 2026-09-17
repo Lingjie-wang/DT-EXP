@@ -11,6 +11,7 @@ return conditions while preserving the original modes for direct comparison.
 """
 
 import copy
+import hashlib
 import os
 from dataclasses import asdict, dataclass
 from typing import Dict, Optional, Tuple
@@ -67,6 +68,16 @@ class SAPTrainConfig(TrainConfig):
     reference_tolerance: float = 0.0
     reference_checkpoint_path: Optional[str] = None
     pretrained_checkpoint_path: Optional[str] = None
+    # Opt-in snapshots; an empty tuple preserves historical saving behavior.
+    checkpoint_steps: Tuple[int, ...] = ()
+
+
+def file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class StateAlignedPreferenceDataset(IterableDataset):
@@ -500,8 +511,18 @@ def train(config: SAPTrainConfig):
         )
     if config.reference_tolerance < 0.0:
         raise ValueError("reference_tolerance must be non-negative")
+    if config.reference_weight < 0.0:
+        raise ValueError("reference_weight must be non-negative")
     set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
     wandb_init(asdict(config))
+    for key, path in (
+        ("pretrained_checkpoint", config.pretrained_checkpoint_path),
+        ("preference_arrays", config.preference_arrays_path),
+    ):
+        if path is not None:
+            checksum = file_sha256(path)
+            wandb.run.summary[f"provenance/{key}_sha256"] = checksum
+            print(f"{key} SHA256: {checksum}", flush=True)
 
     dataset = SequenceDataset(
         config.env_name,
@@ -865,6 +886,12 @@ def train(config: SAPTrainConfig):
                 {
                     "train/preference_loss": preference_loss.item(),
                     "train/reference_loss": reference_loss.item(),
+                    "train/weighted_reference_loss": (
+                        config.reference_weight * reference_loss.item()
+                    ),
+                    "train/weighted_preference_loss": (
+                        config.preference_weight * preference_loss.item()
+                    ),
                     "train/reference_deviation": reference_deviation.item(),
                     "train/reference_violation_ratio": (
                         reference_violation_ratio.item()
@@ -935,6 +962,28 @@ def train(config: SAPTrainConfig):
                     step=step,
                 )
             model.train()
+
+        if config.checkpoints_path is not None and step in config.checkpoint_steps:
+            checkpoint = {
+                "next_step": step + 1,
+                "logged_step": step,
+                "model_state": model.state_dict(),
+                "optimizer_state": optim.state_dict(),
+                "scheduler_state": scheduler.state_dict(),
+                "state_mean": dataset.state_mean,
+                "state_std": dataset.state_std,
+                "config": asdict(config),
+                "wandb_run_id": wandb.run.id,
+                "resume_note": "Model/optimizer snapshot; loader queues and RNG "
+                "are not restored by this training entry point.",
+            }
+            checkpoint_path = os.path.join(
+                config.checkpoints_path, f"step{step:06d}.pt"
+            )
+            temporary_path = f"{checkpoint_path}.tmp-{os.getpid()}"
+            torch.save(checkpoint, temporary_path)
+            os.replace(temporary_path, checkpoint_path)
+            print(f"Saved continuation checkpoint: {checkpoint_path}", flush=True)
 
     if config.checkpoints_path is not None:
         checkpoint = {
