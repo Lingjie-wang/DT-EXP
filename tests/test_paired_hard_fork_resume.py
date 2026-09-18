@@ -56,7 +56,8 @@ class PairedResumeTest(unittest.TestCase):
         torch.testing.assert_close(actual_grad, expected_grad, rtol=0, atol=0)
 
     def test_original_v3_auxiliary_branch_is_unchanged(self):
-        tree = ast.parse(Path(hard_fork_dt.__file__).read_text())
+        source = Path(hard_fork_dt.__file__).read_text()
+        tree = ast.parse(source)
         branches = [
             n for n in ast.walk(tree)
             if isinstance(n, ast.If) and len(n.body) > 5
@@ -64,10 +65,11 @@ class PairedResumeTest(unittest.TestCase):
             and "preference_start_step" in ast.dump(n.test)
         ]
         self.assertEqual(len(branches), 1)
-        # AST digest of the entire branch at commit 1e8a9c1, excluding locations.
-        actual = hashlib.sha256(ast.dump(branches[0]).encode()).hexdigest()
+        # Source digest at commit 1e8a9c1; ast.dump differs across Python versions.
+        segment = ast.get_source_segment(source, branches[0])
+        actual = hashlib.sha256(segment.encode()).hexdigest()
         self.assertEqual(
-            actual, "5e394f646cd4fbf92cd83a14e64c39380c8cbbf8e32a818ab46f996861f0cada"
+            actual, "20804e290ffc170e18353196bf381edb5dfd33de61c308e05f549aa40ba2ce38"
         )
 
 
