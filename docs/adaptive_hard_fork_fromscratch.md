@@ -1,6 +1,6 @@
 # 当前模型重评分 + 近期 reference：从头训练实验
 
-日期：2026-09-19。状态：实现与短跑验证阶段，正式作业编号见文末启动记录。
+日期：2026-09-19。状态：短跑验证已通过，正式三组已提交，详见文末启动记录。
 
 本实验落实 v3-high 工作稿之后的新提案，使用独立训练入口，不修改原 v3-high。
 这是完整训练方案的 seed-0 可行性验证，不是对所有新组件的单因素归因实验。
@@ -147,4 +147,33 @@ Smoke 保留完整网络和 batch，训练 9 步；辅助在第 2 步之后开�
 
 ## 7. 启动记录
 
-待完成验证后填写作业编号、代码提交和 W&B 链接。
+实现提交：`4555d161dc1bff43a2041501024e8f76b8868a98`，已推送 GitHub。
+[codestyle 线上检查通过](https://github.com/Lingjie-wang/DT-EXP/actions/runs/35373495291)。
+原 v3-high 文档单独提交为 `ef4dd59`；历史训练入口与 launcher 未更改。
+
+短跑作业 `9346_0/1/2` 全部在 gn7 的 RTX 4090 上以 exit 0 完成，各约 36～37 秒。
+8 个机制单元测试通过，三组各完成 9 次更新和 3 次双目标评测。跨组三组审计通过：
+
+- 初始模型 SHA256 均为 `7c137560795f9c673d3a7a93cb0e93925ac93835e6994369adf8ef5912073c64`。
+- 实际 batch / Torch RNG 在审计的 1、2、3、4、5、6、9 步一致。
+- 辅助启用前及 ramp=0 的首次辅助更新，三组权重和 loss 一致。
+- 全部 9 步的 DT 结构抽样流与 reference 抽样流累积哈希一致。
+- 各组实际加权 loss 开关及总 loss 等式正确，更新后模型按预期分化。
+- 只使用 2124 个原始 strict pair；pair 文件 SHA256 为
+  `8ec016c96d81f0cc5b73e0e32521616ee1364f143abc0efccf07dd8f72c8b52a`。
+
+正式数组作业：`9349`，GPUNorm，固定 gn7 / RTX 4090，`--array=0-2%2`。
+优先释放 0 和 2，启动后释放 1；没有遗留手动 hold。
+
+| 作业 | 实验 | 提交时状态 / W&B |
+| --- | --- | --- |
+| `9349_0` | A：DT control | 已启动，[W&B](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/02f6831f-2004-450e-9f17-2cf2f928a9e0) |
+| `9349_1` | B：DT + recent reference | 等待数组并发名额；启动后自动创建 W&B run |
+| `9349_2` | C：adaptive preference + recent reference | 已启动，[W&B](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/f93e3a23-c3ab-48b4-9985-b8a929e50835) |
+
+W&B group：`AdaptiveHF-FromScratch100k-HCMR-delayed-seed0`。
+本地结果根目录：服务器 `checkpoints/adaptive-hf-fromscratch/job-9349/`，
+各 arm 内有唯一 run 目录，包含 `config.json`、`metrics.jsonl`、`evaluations.json`、
+`pairing_audit.json`、`reference_events.json` 和阶段 checkpoint，结束后写 `summary.json`。
+
+上述链接与状态是启动记录，不是完成结果。未创建定时监控。
