@@ -21,8 +21,10 @@ def audit(root, require_complete=False):
             raise AssertionError(f"Expected one run for {arm}, got {len(matches)}")
         directories.append(matches[0].parent)
     configs = [read(path / "config.json") for path in directories]
+    # Queued arms can start after a documentation/audit-only commit. Compare
+    # trainer/base-DT source hashes below, not the unrelated repository HEAD.
     allowed = {"arm", "name", "checkpoints_path", "wandb_id", "wandb_url",
-               "slurm_job_id"}
+               "slurm_job_id", "git_commit"}
     keys = set().union(*(set(config) for config in configs))
     for key in keys - allowed:
         if any(config.get(key) != configs[0].get(key) for config in configs[1:]):
@@ -62,6 +64,8 @@ def audit(root, require_complete=False):
               "audited_steps": common, "gpu": configs[0]["gpu"],
               "initial_model_sha256": configs[0]["initial_model_sha256"],
               "strict_pair_count": configs[0]["strict_pair_count"],
+              "source_sha256": configs[0]["source_sha256"],
+              "git_commits": dict(zip(ARMS, [config["git_commit"] for config in configs])),
               "wandb_urls": dict(zip(ARMS, [config["wandb_url"] for config in configs]))}
     if complete:
         summaries = [read(path / "summary.json") for path in directories]

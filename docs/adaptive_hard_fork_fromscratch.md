@@ -177,3 +177,7 @@ W&B group：`AdaptiveHF-FromScratch100k-HCMR-delayed-seed0`。
 `pairing_audit.json`、`reference_events.json` 和阶段 checkpoint，结束后写 `summary.json`。
 
 上述链接与状态是启动记录，不是完成结果。未创建定时监控。
+
+启动记录提交发生在 A/C 启动之后、B 排队期间，因此各组记录的 Git HEAD 可能不同。
+审计将分别展示 HEAD，并严格比较实际训练入口、基础 DT 的 source SHA256 与所有
+有效配置；仅文档/审计器提交的差异不被误判成训练代码差异。运行中不修改训练代码。
