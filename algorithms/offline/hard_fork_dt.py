@@ -31,8 +31,9 @@ from dt import (
     wandb_init,
     wrap_env,
 )
+from top_return_weighted_dt import batch_hash, model_hash, restore_rng, rng_state
 from torch.utils.data import DataLoader, IterableDataset
-from tqdm.auto import trange
+from tqdm.auto import tqdm, trange
 
 @dataclass
 class SAPTrainConfig(TrainConfig):
@@ -70,6 +71,9 @@ class SAPTrainConfig(TrainConfig):
     pretrained_checkpoint_path: Optional[str] = None
     # Opt-in snapshots; an empty tuple preserves historical saving behavior.
     checkpoint_steps: Tuple[int, ...] = ()
+    # Opt-in paired continuation; legacy runs retain their original behavior.
+    paired_resume: bool = False
+    pairing_audit_steps: int = 3
 
 
 def file_sha256(path: str) -> str:
@@ -78,6 +82,54 @@ def file_sha256(path: str) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def continuation_steps(start: int, stop: int, paired: bool):
+    """Paired runs log completed updates; legacy runs log zero-based indices."""
+    offset = int(paired)
+    return range(start + offset, stop + offset)
+
+
+def torch_rng_hash() -> str:
+    state = rng_state()
+    digest = hashlib.sha256(state["torch"].numpy().tobytes())
+    for value in state["cuda"]:
+        digest.update(value.cpu().numpy().tobytes())
+    return digest.hexdigest()
+
+
+def validate_paired_checkpoint(checkpoint, config, dataset):
+    required = {
+        "model_state", "optimizer_state", "scheduler_state", "rng_state",
+        "loader_generator_state", "completed_updates", "state_mean", "state_std",
+    }
+    missing = required.difference(checkpoint)
+    if missing:
+        raise ValueError(f"Paired checkpoint is missing: {sorted(missing)}")
+    if checkpoint["completed_updates"] != checkpoint["next_step"]:
+        raise ValueError("Checkpoint completed-update count is inconsistent")
+    if checkpoint["next_step"] != config.preference_start_step:
+        raise ValueError("Paired run must branch at preference_start_step")
+    if config.update_steps <= checkpoint["next_step"]:
+        raise ValueError("Paired run must perform at least one update")
+    if config.preference_mode != "hard_fork":
+        raise ValueError("Paired control uses hard_fork with BOTH weights zero")
+    if config.reference_checkpoint_path is not None:
+        raise ValueError("Paired runs must not overwrite their input checkpoint")
+    for key in (
+        "env_name", "reward_mode", "train_seed", "batch_size", "seq_len",
+        "embedding_dim", "num_layers", "num_heads", "num_workers",
+        "learning_rate", "warmup_steps", "weight_decay", "clip_grad",
+        "attention_dropout", "residual_dropout", "embedding_dropout",
+        "reward_scale", "episode_len", "max_action",
+    ):
+        if checkpoint["config"][key] != getattr(config, key):
+            raise ValueError(f"Paired checkpoint configuration mismatch: {key}")
+    if tuple(checkpoint["config"]["betas"]) != tuple(config.betas):
+        raise ValueError("Paired checkpoint configuration mismatch: betas")
+    for key in ("state_mean", "state_std"):
+        if not np.array_equal(checkpoint[key], getattr(dataset, key)):
+            raise ValueError(f"Paired checkpoint normalization mismatch: {key}")
 
 
 class StateAlignedPreferenceDataset(IterableDataset):
@@ -513,6 +565,8 @@ def train(config: SAPTrainConfig):
         raise ValueError("reference_tolerance must be non-negative")
     if config.reference_weight < 0.0:
         raise ValueError("reference_weight must be non-negative")
+    if config.paired_resume and config.pretrained_checkpoint_path is None:
+        raise ValueError("paired_resume requires pretrained_checkpoint_path")
     set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
     wandb_init(asdict(config))
     for key, path in (
@@ -533,11 +587,16 @@ def train(config: SAPTrainConfig):
     wandb.log(
         {f"dataset/{key}": value for key, value in dataset.stats.items()}, step=0
     )
+    training_generator = (
+        torch.Generator().manual_seed(config.train_seed)
+        if config.paired_resume else None
+    )
     trainloader = DataLoader(
         dataset,
         batch_size=config.batch_size,
         pin_memory=True,
         num_workers=config.num_workers,
+        generator=training_generator,
     )
     eval_env = wrap_env(
         env=gym.make(config.env_name),
@@ -611,8 +670,12 @@ def train(config: SAPTrainConfig):
     start_step = 0
     if config.pretrained_checkpoint_path is not None:
         checkpoint = torch.load(
-            config.pretrained_checkpoint_path, map_location=config.device
+            config.pretrained_checkpoint_path,
+            map_location="cpu" if config.paired_resume else config.device,
         )
+        if config.paired_resume:
+            validate_paired_checkpoint(checkpoint, config, dataset)
+            training_generator.set_state(checkpoint["loader_generator_state"])
         model.load_state_dict(checkpoint["model_state"])
         if "optimizer_state" in checkpoint:
             optim.load_state_dict(checkpoint["optimizer_state"])
@@ -636,10 +699,20 @@ def train(config: SAPTrainConfig):
         iter(preference_loader) if preference_loader is not None else None
     )
     reference_model = None
+    if config.paired_resume:
+        # Restore only after model/loader setup. Worker queues restart identically
+        # in both arms, not at the old uninterrupted loader's exact position.
+        restore_rng(checkpoint["rng_state"])
+        wandb.run.summary["pairing/initial_model_sha256"] = model_hash(model)
+        wandb.run.summary["pairing/restored_torch_rng_sha256"] = torch_rng_hash()
+        wandb.run.summary["pairing/restored_optimizer_lr"] = optim.param_groups[0]["lr"]
+        wandb.run.summary["pairing/restored_scheduler_epoch"] = scheduler.last_epoch
+        print("Paired resume: completed-update indexing and checkpoint RNG restored")
 
-    for step in trange(start_step, config.update_steps, desc="Training"):
+    steps = continuation_steps(start_step, config.update_steps, config.paired_resume)
+    for step in tqdm(steps, desc="Training"):
         if (
-            step == config.preference_start_step
+            step == config.preference_start_step + int(config.paired_resume)
             and config.preference_mode != "control"
         ):
             if config.reference_checkpoint_path is not None:
@@ -670,6 +743,11 @@ def train(config: SAPTrainConfig):
             wandb.log({"train/reference_initialized": 1.0}, step=step)
 
         batch = next(trainloader_iter)
+        audit = config.paired_resume and step <= start_step + config.pairing_audit_steps
+        if audit:
+            prefix = f"pairing/update_{step}"
+            wandb.run.summary[f"{prefix}/dt_batch_sha256"] = batch_hash(batch)
+            wandb.run.summary[f"{prefix}/torch_rng_sha256"] = torch_rng_hash()
         states, actions, returns, time_steps, mask = [
             item.to(config.device) for item in batch
         ]
@@ -684,6 +762,8 @@ def train(config: SAPTrainConfig):
             predicted_actions, actions.detach(), reduction="none"
         )
         dt_loss = (elementwise_loss * mask.unsqueeze(-1)).mean()
+        if audit:
+            wandb.run.summary[f"{prefix}/dt_loss"] = dt_loss.item()
         total_loss = dt_loss
         preference_loss = None
         reference_loss = None
@@ -871,6 +951,8 @@ def train(config: SAPTrainConfig):
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_grad)
         optim.step()
         scheduler.step()
+        if audit:
+            wandb.run.summary[f"{prefix}/model_sha256"] = model_hash(model)
 
         metrics = {
             "train_loss": dt_loss.item(),
@@ -881,6 +963,8 @@ def train(config: SAPTrainConfig):
                 and config.preference_mode != "control"
             ),
         }
+        if config.paired_resume:
+            metrics["train/completed_updates"] = step
         if preference_loss is not None:
             metrics.update(
                 {
@@ -926,7 +1010,9 @@ def train(config: SAPTrainConfig):
                 )
         wandb.log(metrics, step=step)
 
-        if step % config.eval_every == 0 or step == config.update_steps - 1:
+        final_step = config.update_steps - int(not config.paired_resume)
+        if step % config.eval_every == 0 or step == final_step:
+            saved_rng = rng_state() if config.paired_resume else None
             model.eval()
             for target_return in config.target_returns:
                 eval_env.seed(config.eval_seed)
@@ -962,10 +1048,12 @@ def train(config: SAPTrainConfig):
                     step=step,
                 )
             model.train()
+            if saved_rng is not None:
+                restore_rng(saved_rng)
 
         if config.checkpoints_path is not None and step in config.checkpoint_steps:
             checkpoint = {
-                "next_step": step + 1,
+                "next_step": step + int(not config.paired_resume),
                 "logged_step": step,
                 "model_state": model.state_dict(),
                 "optimizer_state": optim.state_dict(),
@@ -977,6 +1065,17 @@ def train(config: SAPTrainConfig):
                 "resume_note": "Model/optimizer snapshot; loader queues and RNG "
                 "are not restored by this training entry point.",
             }
+            if config.paired_resume:
+                checkpoint.update({
+                    "completed_updates": step,
+                    "rng_state": rng_state(),
+                    "loader_generator_state": training_generator.get_state(),
+                    "reference_model_state": reference_model.state_dict(),
+                    "pair_dynamic_priorities": preference_dataset.dynamic_priorities,
+                    "resume_note": "Paired branch snapshot. Worker prefetch queues "
+                    "are not serialized. This entry point branches at the reference "
+                    "start only; later exact resumption is not implemented.",
+                })
             checkpoint_path = os.path.join(
                 config.checkpoints_path, f"step{step:06d}.pt"
             )
