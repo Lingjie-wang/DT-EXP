@@ -74,3 +74,19 @@ sbatch --nodelist=gn4 scripts/dt_experiments/run_v3_reference_only_to100k_hcmr_s
 
 Smoke uses the full training batch, two updates, one evaluation episode per
 target and offline W&B. Full training logs online; no recurring monitor is set.
+
+## Submitted run (2026-09-18)
+
+- Code commit: `fad8a1a82ffee55c3477e10ce26813e59c517000` (GitHub codestyle passed).
+- Smoke job `9139`: completed, exit 0; both updates have exactly zero weighted
+  preference loss, positive weighted reference loss and finite total loss.
+  Verified `total = DT + 0.1 * reference` and saved `step050001.pt`.
+- Full job `9140`: started on `gn5`, NVIDIA GeForce RTX 3090, online W&B.
+- [W&B run](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/8b9d5ee7-7cef-4156-875b-d057b8640841).
+  Name: `DT-RefOnly-50kTo100k-HCMR-delayed-seed0-halfcheetah-medium-replay-v2-89f0fef6`.
+- Actual submission used `--nodelist=gn5 --cpus-per-task=6`: `gn4` had no
+  sufficient schedulable RAM; `gn5` had a free same-model GPU and six free CPUs.
+  DataLoader workers remain 4, and training batch/optimizer settings are unchanged.
+- Compared the saved full-run config with the completed Ref010 W&B config:
+  only `preference_weight`, `name` and `checkpoints_path` differ. Both input
+  SHA256 hashes match. Old checkpoints and trainer code are untouched.
