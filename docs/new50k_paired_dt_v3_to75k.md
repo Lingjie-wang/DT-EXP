@@ -79,3 +79,30 @@ sbatch --array=0-1 scripts/dt_experiments/run_new50k_paired_dt_v3_to75k_hcmr_see
 Smoke runs three full-batch updates with evaluation after EACH update, one
 episode per target, to audit pairing even across intervening evaluations.
 No new dependencies or recurring monitors are required.
+
+## Launch record and pairing audit (2026-09-18)
+
+Production code: `3266fde65cf869d2a8d189dcdeb4afc17c305989` (GitHub codestyle
+passed). The feature commit is `487b0cd`; follow-up commits place tests in the
+configured MuJoCo environment and make the source-integrity test Python-version
+independent. Initial smoke array `9182` stopped at that test, before training.
+
+Successful smoke: `9184_0` (DT) and `9184_1` (v3), both completed on RTX 4090
+with exit 0. Each passed four unit tests and three full-batch updates, including
+intervening evaluations. Cross-run audit of their W&B binary records verified:
+
+- Both initial model hashes match the NEW input checkpoint tensor hash above.
+- Restored LR is 0.0008 and scheduler epoch is 50000 in both arms.
+- All first-three DT batch hashes and Torch CPU/CUDA RNG hashes match exactly.
+- First DT loss is exactly `0.039531702088585516` in both arms.
+- DT's total loss equals ordinary DT loss on all three steps; both weighted
+  auxiliary terms are zero. V3 has nonzero preference and reference terms.
+- Both `step050003.pt` snapshots contain exactly 50,003 completed updates and
+  a frozen reference whose tensor hash matches the NEW input checkpoint.
+
+Production array: `9186_0` is DT control; `9186_1` is v3-high. Both use the
+same script with only the two objective coefficients and run/output names changed.
+Submission restricts eligible nodes to the known RTX 4090 nodes (`gn7`, `gn8`,
+`gn12`) by excluding other current GPUNorm nodes. The account's two-running-job
+limit also includes the existing reference-only job `9140`; no old job is stopped.
+Group: [paired runs](https://wandb.ai/2820402607-shandong-university/CORL-DDR/groups/New50k-Paired-DT-v3-50kTo75k-HCMR-delayed-seed0).
