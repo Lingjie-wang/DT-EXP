@@ -38,6 +38,10 @@ if [[ "${1:-}" == smoke ]]; then
 fi
 cd "${PROJECT}"
 git rev-parse HEAD
+if [[ "${1:-}" == smoke ]]; then
+  PYTHONPATH=algorithms/offline python -m unittest discover -s tests \
+    -p test_paired_hard_fork_resume.py
+fi
 python algorithms/offline/hard_fork_dt.py \
   --config_path configs/offline/dt/halfcheetah/medium_replay_v2.yaml \
   --project corl-ddr --group New50k-Paired-DT-v3-50kTo75k-HCMR-delayed-seed0 \
