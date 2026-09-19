@@ -143,3 +143,44 @@ through `V3_FRESH_CAMPAIGN`. Failed smoke files remain untouched. Seeds 3/4/5,
 the six comparison arms, loss coefficients, pair recipe, evaluation and budget
 are unchanged. Fresh production jobs will be submitted only after all three
 GPU smoke audits pass; obsolete pending dependency jobs will be cancelled.
+
+### Successful retry and production launch
+
+Fix commit: `ea0da248bf46776a64a4028fb330011476cd94dd`.
+[GitHub codestyle passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/35449808367).
+The real installed W&B 0.17.4 API also passed an offline journal test that checks
+both same-step metric rows, their merged values, summary and completion marker.
+
+GPU job **9505** completed successfully on gn12 / RTX 4090 at 22:53:23 CST
+(4m30s, exit 0). All 18 unit tests passed, as did the full-batch paired smoke for
+seeds 3, 4 and 5, including intervening evaluations. The global gate manifest is
+`results/v3-high-fresh345-20260919-retry1/smoke/all_seeds_passed.json`.
+Initial seed weights are distinct; within each seed both arms have matching
+source weights, restored RNG/LR/scheduler, first three ordinary batches/dropout
+states and first ordinary DT loss. Loss composition, frozen reference and final
+completed-update counts pass. No short-run weights initialize production.
+
+Obsolete pending arrays 9457, 9458, 9459 and 9460 were cancelled; no previous
+experiment data was deleted. New job mapping:
+
+| Seed | Shared ordinary DT 0-50k + pair gate | DT 50-100k | v3-high 50-100k |
+| --- | --- | --- | --- |
+| 3 | 9506_3 | 9510_0 | 9510_1 |
+| 4 | 9506_4 | 9511_0 | 9511_1 |
+| 5 | 9506_5 | 9512_0 | 9512_1 |
+
+Each branch array depends on successful completion of its own seed's preparation
+task, not merely on the global smoke. At the post-launch check, seeds 3 and 4
+were RUNNING on gn12 and gn7 with actual finite training-loss records (at least
+100 and 200 updates respectively). Seed 5 was PENDING due to `AssocMaxJobsLimit`,
+and the six continuation arms correctly waited on their seed-specific dependency.
+
+Online warmup runs:
+
+- [Seed 3](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/c8a372ad-ff3a-4f46-88b8-9393282fe145)
+- [Seed 4](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/2bc7e621-6aed-49ef-8d25-031dc5041b6e)
+
+W&B group and method names remain unchanged. The warmup is ordinary DT with
+`top_weight=1.0`; apparent top/other diagnostic metric names do not imply an
+enabled high-return weighting objective. Final evaluation results are not yet
+available. No recurring monitoring was created.
