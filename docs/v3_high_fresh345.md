@@ -98,3 +98,28 @@ on its preparation task succeeding. Formal jobs exclude non-4090 nodes.
 Each job requests one GPUNorm GPU, 6 CPUs and 48 GB RAM. Account running-job
 limits and existing experiments are respected; no existing job is stopped.
 Long jobs cannot start after a failed prerequisite. No recurring monitor is set.
+
+## Submission record
+
+Implementation commit: `bb604c96782b75995f427ab132e4f3e5c43a297c`.
+[GitHub codestyle passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/35434698295).
+Seven new protocol tests and shell syntax checks passed locally. MuJoCo-dependent
+tests could not import on the CPU login node (`GL/osmesa.h` is unavailable);
+they run again inside the allocated GPU smoke job before training. No package
+installation or algorithm change was used to bypass that environment constraint.
+
+Submitted on 2026-09-19, approximately 17:28 CST:
+
+| Stage | Slurm jobs | Success prerequisite |
+| --- | --- | --- |
+| GPU tests + all-seed smoke | 9456 | none |
+| New seed warmup + mining + paired gate | 9457_3, 9457_4, 9457_5 | 9456 |
+| Seed 3 DT / v3-high | 9458_0 / 9458_1 | 9457_3 |
+| Seed 4 DT / v3-high | 9459_0 / 9459_1 | 9457_4 |
+| Seed 5 DT / v3-high | 9460_0 / 9460_1 | 9457_5 |
+
+At submission all new jobs are PENDING; the smoke job waits for an eligible
+GPU and later stages wait on their dependencies. GPU validation and production
+results are not yet available. The account allows two simultaneous running jobs;
+existing QT job 9384 remains running and untouched. Scheduler start estimates
+are provisional, not completion promises. Formal eligible nodes: gn7, gn8, gn12.
