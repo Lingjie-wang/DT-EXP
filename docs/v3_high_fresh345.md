@@ -123,3 +123,23 @@ GPU and later stages wait on their dependencies. GPU validation and production
 results are not yet available. The account allows two simultaneous running jobs;
 existing QT job 9384 remains running and untouched. Scheduler start estimates
 are provisional, not completion promises. Formal eligible nodes: gn7, gn8, gn12.
+
+## Recovery from failed journal gate (2026-09-19)
+
+Job 9456 acquired gn8 at 18:21:22 CST and failed at 18:22:48, after seed 3's
+short paired training but before the audit finished. W&B initialization rebound
+module-level `wandb.log`, replacing the observer installed before initialization.
+Consequently no `metrics.jsonl` existed, and the audit raised `FileNotFoundError`.
+Jobs 9457-9460 never started production; 9457 had `DependencyNeverSatisfied`.
+
+The fix installs the log observer AFTER W&B initialization and forwards to the
+returned run's bound logger. A worker now fails before writing `completed.json`
+if its metrics journal is missing or empty. Regression tests reproduce W&B's
+logger rebinding, check exact forwarding and local rows, reject missing journals
+and nonfinite metrics, and retain the unchanged algorithm-source hash checks.
+
+Recovery uses a new output campaign `v3-high-fresh345-20260919-retry1`, selected
+through `V3_FRESH_CAMPAIGN`. Failed smoke files remain untouched. Seeds 3/4/5,
+the six comparison arms, loss coefficients, pair recipe, evaluation and budget
+are unchanged. Fresh production jobs will be submitted only after all three
+GPU smoke audits pass; obsolete pending dependency jobs will be cancelled.

@@ -27,7 +27,7 @@ export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 cd "${PROJECT}"
 
-CAMPAIGN=v3-high-fresh345-20260919
+CAMPAIGN="${V3_FRESH_CAMPAIGN:-v3-high-fresh345-20260919}"
 case "${1:-}" in
   smoke|tests)
     PYTHONPATH=algorithms/offline:scripts/dt_experiments python -m unittest discover \

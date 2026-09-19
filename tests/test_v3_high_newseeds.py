@@ -1,8 +1,14 @@
 """Protocol tests; GPU smoke also checks actual checkpoint/data/RNG pairing."""
 
+import json
+import sys
+import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import v3_high_newseeds as workflow
 from v3_high_newseeds import (
     branch_flags,
     plain,
@@ -17,6 +23,71 @@ def mapping(argv):
 
 
 class FreshSeedTests(unittest.TestCase):
+    def run_journal(self, root, send_metrics=True, nonfinite=False):
+        fake = types.ModuleType("wandb")
+        run = types.SimpleNamespace(
+            id="test-run", url=None, name="test-run", config={"train_seed": 3},
+            summary={"nested": {"value": 1.0}}, log=mock.Mock(),
+        )
+        fake.run = None
+        fake.log = mock.Mock(side_effect=AssertionError("Pre-init logger called"))
+        fake.finish = mock.Mock()
+
+        def initialize():
+            fake.run = run
+            fake.log = run.log  # Reproduce W&B's actual initialization behavior.
+            return run
+
+        fake.init = initialize
+
+        def entry(*args, **kwargs):
+            fake.init()
+            if send_metrics:
+                fake.log({"train_loss": float("nan") if nonfinite else 0.25}, step=3)
+                fake.log({"eval/score": 42.0}, step=3)
+            fake.finish()
+
+        record = Path(root) / "records"
+        arguments = types.SimpleNamespace(
+            record_dir=str(record), entry="hard_fork_dt.py", remaining=[],
+        )
+        with mock.patch.dict(sys.modules, {"wandb": fake}), \
+                mock.patch.object(workflow.runpy, "run_path", side_effect=entry), \
+                mock.patch.object(sys, "argv", ["test"]), \
+                mock.patch.object(sys, "path", list(sys.path)):
+            workflow.journal_worker(arguments)
+        return record, run
+
+    def test_journal_survives_wandb_init_rebinding_and_forwards_once(self):
+        with tempfile.TemporaryDirectory() as root:
+            record, run = self.run_journal(root)
+            rows = [json.loads(line) for line in
+                    (record / "metrics.jsonl").read_text().splitlines()]
+            self.assertEqual(rows, [
+                {"step": 3, "train_loss": 0.25}, {"step": 3, "eval/score": 42.0},
+            ])
+            self.assertEqual(run.log.call_count, 2)
+            self.assertEqual(workflow.metric_rows(record)[3]["train_loss"], 0.25)
+            self.assertEqual(workflow.metric_rows(record)[3]["eval/score"], 42.0)
+            self.assertTrue((record / "completed.json").is_file())
+            self.assertEqual(workflow.read_json(record / "summary.json"), run.summary)
+
+    def test_missing_metrics_fails_before_completion_marker(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(RuntimeError, "without a local metrics"):
+                self.run_journal(root, send_metrics=False)
+            record = Path(root) / "records"
+            self.assertTrue((record / "failed.json").is_file())
+            self.assertFalse((record / "completed.json").exists())
+
+    def test_nonfinite_metrics_are_not_forwarded_or_marked_complete(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaises(ValueError):
+                self.run_journal(root, nonfinite=True)
+            record = Path(root) / "records"
+            self.assertTrue((record / "failed.json").is_file())
+            self.assertFalse((record / "completed.json").exists())
+
     def test_nested_wandb_summary_mapping_can_be_journaled(self):
         class SummaryLike:
             def keys(self):

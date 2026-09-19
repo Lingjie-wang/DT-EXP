@@ -76,10 +76,17 @@ def journal_worker(arguments):
     verify_sources()
     record = Path(arguments.record_dir).resolve()
     record.mkdir(parents=True, exist_ok=False)
-    original_init, original_log, original_finish = wandb.init, wandb.log, wandb.finish
+    original_init, original_finish = wandb.init, wandb.finish
+    active_run_log = None
 
     def init(*args, **kwargs):
+        nonlocal active_run_log
         run = original_init(*args, **kwargs)
+        # wandb.init replaces module-level wandb.log with the new run's method.
+        # Install our observer AFTER initialization and forward to that bound
+        # method, never to the pre-init proxy or our own observer.
+        active_run_log = run.log
+        wandb.log, wandb.finish = log, finish
         write_json(record / "run.json", {
             "id": run.id, "url": run.url, "name": run.name,
             "config": dict(run.config), "source_sha256": SOURCE_HASHES,
@@ -90,13 +97,15 @@ def journal_worker(arguments):
         return run
 
     def log(data, *args, **kwargs):
+        if active_run_log is None:
+            raise RuntimeError("Initialize W&B before logging training metrics")
         step = kwargs.get("step", args[0] if args else None)
         row = {"step": step, **plain(dict(data))}
         # fail loudly if any numeric metric becomes NaN/Inf, never silently skip it
         encoded = json.dumps(row, allow_nan=False)
         with open(record / "metrics.jsonl", "a") as stream:
             stream.write(encoded + "\n")
-        return original_log(data, *args, **kwargs)
+        return active_run_log(data, *args, **kwargs)
 
     def finish(*args, **kwargs):
         if wandb.run is not None:
@@ -112,6 +121,9 @@ def journal_worker(arguments):
     sys.path.insert(0, str(entry.parent))
     try:
         runpy.run_path(str(entry), run_name="__main__")
+        metrics_path = record / "metrics.jsonl"
+        if not metrics_path.is_file() or metrics_path.stat().st_size == 0:
+            raise RuntimeError("Training returned without a local metrics journal")
     except BaseException as error:
         write_json(record / "failed.json", {"error": repr(error)})
         raise
