@@ -143,4 +143,10 @@ Smoke 使用完整模型与 batch，20 updates，四种口径各 1 episode，off
 actor 和 critic 权重全部有限。该次采样含 27 个非零 delayed 奖励，经 upstream
 原样训练路径清零后剩 0 个，与静态分析及机制测试一致。
 
-正式 job id 与 W&B 链接在启动后补充。
+正式作业：`9384`，GPUNorm / gn7 / RTX 4090，2026-09-19 12:55 左右启动。
+W&B：[QT-Official-Uncorrected-HCMR-delayed-seed0-100k](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/ylm6sxr2)。
+结果目录：`checkpoints/qt-official/job-9384/`。
+实现提交：`a17c68141f71fbe20faa6f93323355518b3a3e58`，已推送且服务器 Git 已同步。
+启动前本地使用与 GitHub CI 相同的 Ruff 0.0.278 对完整工作目录检查通过。
+
+这里记录的是启动状态，不是训练已经完成，也不是已经得到有效提升。
