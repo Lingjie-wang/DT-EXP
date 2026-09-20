@@ -105,7 +105,9 @@ Initialize the detached source with `legacy_v3_high.py init`. Submit a short
 `run_v3_high_legacy345.sbatch smoke` job on an available supported GPU. After
 it passes, submit three `prepare --seed N` jobs on RTX 3090 nodes (gn4/gn5),
 then two `branch --seed N --stage dt|v3` jobs with `afterok` dependencies on
-their own warmup. Use the GPU mapping above, original 12 CPUs/48 GB and GPUNorm.
+their own warmup. Use the GPU mapping above, original 12 CPUs and GPUNorm.
+The initial 48 GB RAM reservation is now 32 GB with explicit user approval
+(see the resource-only amendment below).
 Existing jobs are never cancelled. GPU and CPU/RAM allocation can cause queues;
 the account allows only two concurrent jobs.
 
@@ -135,3 +137,26 @@ warmups are pending RTX 3090 resources; continuation jobs wait on dependencies.
 The known 3090 nodes are gn4/gn5. A free GPU alone is insufficient when the
 required 12 CPUs and 48 GB RAM cannot be allocated together. No old job was
 cancelled, no existing experiment data was removed, and no monitor was created.
+
+## User-approved resource-only amendment
+
+The user explicitly approved reducing the Slurm RAM reservation from 48 GB to
+32 GB to use an available RTX 3090. At the check, gn4 had one unallocated GPU
+but only about 34 GB of schedulable RAM, so the original request could not fit.
+The scheduler's provisional start estimate was September 23. Recorded MaxRSS
+for the full recent warmups and archived smoke was approximately 5 GB; this
+is an observed process-memory statistic, not a guarantee of future peak usage.
+
+Applied `MinMemoryNode=32768` to the nine existing production jobs: 9563, 9564,
+9565, 9595, 9596, 9597, 9598, 9599, 9600. Before/after scheduler records verify
+32 GB and unchanged 12 CPUs, GPU-node filters, time limits and dependencies.
+Job IDs are retained; no job was cancelled or resubmitted. The launcher default
+is updated to 32 GB as well.
+The warmup scheduler time limits were restored to the historical 12 hours;
+continuation limits remain 18 hours.
+
+No learning setting changes: same historical sources, GPU-type mapping,
+12 CPUs, four DataLoader workers, batch 4096, context 20, optimizer, loss
+coefficients, pair miner/sampler, RNG behavior, 50k fork, 100k stop and evaluation.
+In particular, this is a host RAM reservation change, NOT a smaller batch,
+lower GPU memory limit, mixed precision, gradient accumulation or model change.

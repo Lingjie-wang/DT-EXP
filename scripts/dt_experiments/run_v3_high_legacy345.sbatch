@@ -1,10 +1,10 @@
 #!/bin/bash
-# Frozen historical v3 protocol; only production stop is extended to 100k.
+# Frozen historical learning protocol; user-approved 100k stop and 32G RAM request.
 #SBATCH --job-name=v3-legacy345
 #SBATCH --partition=GPUNorm
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=12
-#SBATCH --mem=48G
+#SBATCH --mem=32G
 #SBATCH --time=18:00:00
 #SBATCH --output=/labmount/users/202615385/code/DT-EXP/logs/v3-legacy345-%A_%a.out
 set -euo pipefail
