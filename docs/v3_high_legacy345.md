@@ -109,4 +109,29 @@ their own warmup. Use the GPU mapping above, original 12 CPUs/48 GB and GPUNorm.
 Existing jobs are never cancelled. GPU and CPU/RAM allocation can cause queues;
 the account allows only two concurrent jobs.
 
-Submission IDs and observed validation results are recorded after launch.
+## Validation and submission record
+
+Implementation commits: `acc2df3` and `354e772` (exact earlier DT entrypoint).
+Eight CPU protocol tests pass locally and on the server. Full-repository local
+Ruff check is clean. [GitHub codestyle for the initial implementation passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/35494115809).
+
+GPU smoke 9562 completed on gn7 / RTX 4090 in 1m10s. A follow-up full smoke,
+**9594**, includes the exact earlier control revision; it completed on gn7 in
+**1m16s**, exit 0. It used isolated smoke seed 4, ran the original warmup and
+full 100k-candidate pair miner, then both legacy continuation branches. Each
+branch passed its update-count, loss and evaluation audits. The persisted gate
+includes BOTH historical source revisions. Smoke outputs never initialize long
+training. Initial smoke artifacts are retained, not overwritten.
+
+| Seed | Old-entrypoint warmup + mining | DT to 100k | v3-high to 100k |
+| --- | --- | --- | --- |
+| 3 | 9563 | 9595 | 9596 |
+| 4 | 9564 | 9597 | 9598 |
+| 5 | 9565 | 9599 | 9600 |
+
+Each continuation depends on successful completion of its own warmup AND full
+smoke 9594. The original CPU/RAM requests are preserved. At submission the
+warmups are pending RTX 3090 resources; continuation jobs wait on dependencies.
+The known 3090 nodes are gn4/gn5. A free GPU alone is insufficient when the
+required 12 CPUs and 48 GB RAM cannot be allocated together. No old job was
+cancelled, no existing experiment data was removed, and no monitor was created.
