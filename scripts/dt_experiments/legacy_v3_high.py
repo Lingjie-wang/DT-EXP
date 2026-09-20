@@ -16,6 +16,7 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[2]
 REVISION = "25626cefd9465dadbd0a6ef95756ab943ca7fab6"
+CONTROL_REVISION = "e8126627628ebf2e928796e8a5db3f81fbcd3aa3"
 CAMPAIGN = "v3-high-legacy345-20260920"
 GROUP = "Legacy012-V3High-Seeds345-To100k-HCMR-delayed"
 TEMPLATES = {
@@ -50,15 +51,24 @@ def read_json(path):
     return json.loads(Path(path).read_text())
 
 
-def verify_source(source):
+def source_for(root, stage):
+    if stage == "dt":
+        return root / "control_source", CONTROL_REVISION
+    return root / "source", REVISION
+
+
+def verify_source(source, revision=REVISION):
     if subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=source, text=True
-    ).strip() != REVISION:
+    ).strip() != revision:
         raise RuntimeError("Wrong historical revision")
     hashes = {}
-    for name in FILES:
+    names = FILES
+    if revision == CONTROL_REVISION:
+        names = FILES[:5] + ["scripts/dt_experiments/" + TEMPLATES["dt"]]
+    for name in names:
         original = subprocess.check_output(
-            ["git", "show", f"{REVISION}:{name}"], cwd=PROJECT
+            ["git", "show", f"{revision}:{name}"], cwd=PROJECT
         )
         hashes[name] = hashlib.sha256(original).hexdigest()
         if digest(source / name) != hashes[name]:
@@ -141,7 +151,7 @@ def plain(value):
     return value
 
 
-def install_observer(wandb, record, hashes):
+def install_observer(wandb, record, hashes, revision=REVISION):
     """No RNG/tensor hooks. Block ONLY binary-artifact upload, not local saving."""
     original_init, original_finish = wandb.init, wandb.finish
 
@@ -170,7 +180,7 @@ def install_observer(wandb, record, hashes):
         wandb.log, wandb.save, wandb.finish = log, save, finish
         write_json(record / "run.json", {
             "id": run.id, "url": run.url, "name": run.name,
-            "config": plain(dict(run.config)), "historical_revision": REVISION,
+            "config": plain(dict(run.config)), "historical_revision": revision,
             "source_sha256": hashes,
         })
         return run
@@ -182,8 +192,8 @@ def worker(args, root):
     import torch
     import wandb
 
-    source = root / "source"
-    hashes = verify_source(source)
+    source, revision = source_for(root, args.stage)
+    hashes = verify_source(source, revision)
     gpu = torch.cuda.get_device_name(0)
     if not args.smoke and expected_gpu(args.seed, args.stage) not in gpu:
         raise RuntimeError(f"Wrong historical GPU assignment: {gpu}")
@@ -192,7 +202,7 @@ def worker(args, root):
     record.mkdir(parents=True, exist_ok=False)
     argv = command(source, args.stage, args.seed, directory, args.smoke)
     write_json(record / "command.json", argv)
-    install_observer(wandb, record, hashes)
+    install_observer(wandb, record, hashes, revision)
     os.chdir(source)
     sys.path.insert(0, str(source / "algorithms/offline"))
     sys.argv = argv
@@ -258,6 +268,10 @@ def prepare(root, seed, smoke):
 def branch(root, seed, arm, smoke):
     if arm not in ("dt", "v3"):
         raise ValueError("A continuation branch must be dt or v3")
+    if not smoke:
+        gate = read_json(root / "smoke/passed.json")
+        if gate.get("control_revision") != CONTROL_REVISION or not gate["passed"]:
+            raise RuntimeError("Complete archived-control GPU smoke has not passed")
     directory, _, _ = paths(root, seed, smoke)
     prepared = read_json(directory / "prepared.json")
     for key in ("checkpoint", "pairs"):
@@ -287,7 +301,7 @@ def branch(root, seed, arm, smoke):
             raise RuntimeError("Missing legacy evaluation points")
         scores[str(target)] = values
     write_json(record / "audit.json", {
-        "passed": True, "historical_revision": REVISION,
+        "passed": True, "historical_revision": source_for(root, arm)[1],
         "checkpoint_sha256": prepared["checkpoint_sha256"],
         "pairs_sha256": prepared["pairs_sha256"], "scores": scores,
     })
@@ -307,6 +321,12 @@ def main():
         subprocess.run(["git", "worktree", "add", "--detach", str(root / "source"),
                         REVISION], cwd=PROJECT, check=True)
         write_json(root / "source_manifest.json", verify_source(root / "source"))
+        subprocess.run(["git", "worktree", "add", "--detach",
+                        str(root / "control_source"), CONTROL_REVISION],
+                       cwd=PROJECT, check=True)
+        write_json(root / "control_source_manifest.json", verify_source(
+            root / "control_source", CONTROL_REVISION
+        ))
     elif args.mode == "worker":
         worker(args, root)
     elif args.mode == "prepare":
@@ -316,10 +336,13 @@ def main():
     elif args.mode == "branch":
         branch(root, args.seed, args.stage, False)
     else:
-        prepare(root, 3, True)
+        prepare(root, args.seed, True)
         for arm in ("dt", "v3"):
-            branch(root, 3, arm, True)
-        write_json(root / "smoke/passed.json", {"passed": True, "revision": REVISION})
+            branch(root, args.seed, arm, True)
+        write_json(root / "smoke/passed.json", {
+            "passed": True, "revision": REVISION,
+            "control_revision": CONTROL_REVISION, "seed": args.seed,
+        })
 
 
 if __name__ == "__main__":

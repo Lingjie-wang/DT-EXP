@@ -12,6 +12,12 @@ v3 launcher). Core `dt.py`, `sap_dt_one_sided.py`, `hard_fork_dt.py`, and
 `76896b6`, `29a0b6b`, and `25626ce`. The warmup `sap_dt_one_sided.py` and `dt.py`
 are also unchanged from diagnostic revision `c062d81`.
 
+DT control uses its separately frozen, earlier revision
+`e8126627628ebf2e928796e8a5db3f81fbcd3aa3`, under `control_source/`.
+Actual old control configs predate the `preference_target_mode` field added
+for v3. Although that field is inactive in control mode, use the older complete
+entrypoint too rather than retaining even this unused configuration difference.
+
 The three historical 50k checkpoint configs were read directly from server:
 all came from `DT50kPairDiagnosticPrep`, with `update_steps=50001`,
 `preference_start_step=50000`, `eval_every=50000`, `eval_episodes=10`.
@@ -67,7 +73,8 @@ Nondeterministic Torch kernels remain enabled as historically.
 ## Isolation, logging and checks
 
 Campaign: `results/v3-high-legacy345-20260920/`. The full historical repository
-is a detached Git worktree under its `source/`; current algorithms, old launchers
+is a detached Git worktree under its `source/` (v3/warmup/miner) and
+`control_source/` (DT); current algorithms, old launchers
 and all earlier results are untouched. Verify source hashes before each worker.
 New checkpoint, pair and journal paths are under `production/seedN/`.
 

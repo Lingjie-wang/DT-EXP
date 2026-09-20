@@ -60,6 +60,16 @@ class LegacyProtocolTests(unittest.TestCase):
         self.assertNotIn("--preference_arrays_path", flags)
         self.assertNotIn("--preference_pair_seed", flags)
 
+    def test_control_uses_its_own_historical_revision(self):
+        source, revision = legacy.source_for(self.source, "dt")
+        self.assertEqual(source, self.source / "control_source")
+        self.assertEqual(revision, legacy.CONTROL_REVISION)
+        text = subprocess.check_output([
+            "git", "show", f"{revision}:algorithms/offline/hard_fork_dt.py",
+        ], cwd=ROOT, text=True)
+        self.assertNotIn("preference_target_mode", text)
+        self.assertNotIn("paired_resume", text)
+
     def test_original_pair_thresholds(self):
         flags = self.flags("diagnose", 5)
         for key, value in {"seed": "5", "num_pairs": "100000",
