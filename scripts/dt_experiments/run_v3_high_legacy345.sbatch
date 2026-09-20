@@ -3,6 +3,7 @@
 #SBATCH --job-name=v3-legacy345
 #SBATCH --partition=GPUNorm
 #SBATCH --gres=gpu:1
+#SBATCH --exclude=gn1,gn2,gn3,gn6,gn9,gn10,gn11,gn13
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=32G
 #SBATCH --time=18:00:00

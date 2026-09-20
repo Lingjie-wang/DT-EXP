@@ -82,9 +82,22 @@ def paths(root, seed, smoke=False):
 
 
 def expected_gpu(seed, stage):
-    # Match observed historical assignments, old seeds 0/1/2 -> new 3/4/5.
+    # Historical reference only; the user now permits either supported GPU.
     newer = (stage == "dt" and seed == 3) or (stage == "v3" and seed == 5)
     return "RTX 4090" if newer else "RTX 3090"
+
+
+def hardware_record(gpu, seed, stage):
+    if not any(model in gpu for model in ("RTX 3090", "RTX 4090")):
+        raise RuntimeError(f"Unsupported GPU for this campaign: {gpu}")
+    historical = expected_gpu(seed, stage)
+    return {
+        "gpu": gpu, "historical_gpu": historical,
+        "matches_historical_gpu": historical in gpu,
+        "policy": "user-approved-3090-or-4090-single-gpu",
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+        "node": os.environ.get("SLURMD_NODENAME"),
+    }
 
 
 def set_flag(argv, key, value):
@@ -151,12 +164,16 @@ def plain(value):
     return value
 
 
-def install_observer(wandb, record, hashes, revision=REVISION):
+def install_observer(wandb, record, hashes, revision=REVISION, hardware=None):
     """No RNG/tensor hooks. Block ONLY binary-artifact upload, not local saving."""
     original_init, original_finish = wandb.init, wandb.finish
 
     def init(*args, **kwargs):
         run = original_init(*args, **kwargs)
+        if hardware is not None:
+            for key, value in hardware.items():
+                if value is not None:
+                    run.summary[f"hardware/{key}"] = value
         bound_log, bound_save = run.log, run.save
 
         def log(data, *log_args, **log_kwargs):
@@ -181,7 +198,7 @@ def install_observer(wandb, record, hashes, revision=REVISION):
         write_json(record / "run.json", {
             "id": run.id, "url": run.url, "name": run.name,
             "config": plain(dict(run.config)), "historical_revision": revision,
-            "source_sha256": hashes,
+            "source_sha256": hashes, "hardware": hardware,
         })
         return run
 
@@ -195,14 +212,14 @@ def worker(args, root):
     source, revision = source_for(root, args.stage)
     hashes = verify_source(source, revision)
     gpu = torch.cuda.get_device_name(0)
-    if not args.smoke and expected_gpu(args.seed, args.stage) not in gpu:
-        raise RuntimeError(f"Wrong historical GPU assignment: {gpu}")
+    hardware = hardware_record(gpu, args.seed, args.stage)
     directory, _, _ = paths(root, args.seed, args.smoke)
     record = directory / "records" / args.stage
     record.mkdir(parents=True, exist_ok=False)
     argv = command(source, args.stage, args.seed, directory, args.smoke)
     write_json(record / "command.json", argv)
-    install_observer(wandb, record, hashes, revision)
+    write_json(record / "hardware.json", hardware)
+    install_observer(wandb, record, hashes, revision, hardware)
     os.chdir(source)
     sys.path.insert(0, str(source / "algorithms/offline"))
     sys.argv = argv

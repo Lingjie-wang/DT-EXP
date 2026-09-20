@@ -160,3 +160,28 @@ No learning setting changes: same historical sources, GPU-type mapping,
 coefficients, pair miner/sampler, RNG behavior, 50k fork, 100k stop and evaluation.
 In particular, this is a host RAM reservation change, NOT a smaller batch,
 lower GPU memory limit, mixed precision, gradient accumulation or model change.
+
+## User-approved parallel single-GPU dispatch
+
+The user subsequently approved allowing available RTX 3090 **or** RTX 4090
+GPUs for pending stages, to seek two concurrent independent experiments.
+This supersedes the historical per-seed GPU mapping as a scheduling constraint;
+the old mapping remains a provenance reference, not an enforced requirement.
+The approved node pool is gn4/gn5 (3090) and gn7/gn8/gn12 (4090).
+
+Each job still requests exactly ONE GPU, 12 CPUs and 32 GB RAM. This is NOT
+DDP/DataParallel or multi-GPU training of a single model. The account's two-job
+limit remains in force; no scheduler priority or account limit is bypassed.
+Only still-pending jobs have their excluded-node lists broadened. Running and
+completed jobs are left untouched, and existing dependencies are preserved.
+
+The orchestration-only GPU guard now accepts either supported model. It writes
+the actual GPU, historical GPU, match flag, policy, Slurm job ID and node to
+`records/<stage>/hardware.json` and `run.json`, and to W&B summary fields under
+`hardware/`. This does not alter the archived training configuration or source.
+Earlier running/completed stages retain their original W&B hardware metadata.
+
+All historical learner files, batch size, optimizer, preference/reference losses,
+sampling, RNG handling, 50k fork, 100k stop and evaluations remain unchanged.
+Different GPU models can still lead to numerical differences; hardware identity
+with the old cohort is no longer claimed. No running experiment is restarted.

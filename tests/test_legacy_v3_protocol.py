@@ -95,6 +95,17 @@ class LegacyProtocolTests(unittest.TestCase):
         self.assertEqual(legacy.expected_gpu(4, "v3"), "RTX 3090")
         self.assertEqual(legacy.expected_gpu(5, "v3"), "RTX 4090")
 
+    def test_user_approved_mixed_gpu_dispatch(self):
+        for seed in (3, 4, 5):
+            for stage in ("prepare", "dt", "v3"):
+                for model in ("RTX 3090", "RTX 4090"):
+                    data = legacy.hardware_record("NVIDIA GeForce " + model, seed, stage)
+                    self.assertEqual(data["historical_gpu"], legacy.expected_gpu(seed, stage))
+                    self.assertEqual(data["matches_historical_gpu"],
+                                     model == legacy.expected_gpu(seed, stage))
+        with self.assertRaises(RuntimeError):
+            legacy.hardware_record("NVIDIA A100", 3, "prepare")
+
     def test_logger_survives_init_rebinding_and_blocks_binary_upload(self):
         logged, saved = [], []
         run = SimpleNamespace(
@@ -111,8 +122,14 @@ class LegacyProtocolTests(unittest.TestCase):
         wandb.init = init
         record = self.source / "record"
         record.mkdir()
-        legacy.install_observer(wandb, record, {})
+        hardware = legacy.hardware_record("NVIDIA GeForce RTX 4090", 4, "prepare")
+        legacy.install_observer(wandb, record, {}, hardware=hardware)
         wandb.init()
+        self.assertEqual(run.summary["hardware/gpu"], "NVIDIA GeForce RTX 4090")
+        self.assertFalse(run.summary["hardware/matches_historical_gpu"])
+        self.assertEqual(run.config, {})
+        self.assertEqual(json.loads((record / "run.json").read_text())["hardware"],
+                         hardware)
         wandb.log({"train_loss": 0.5}, step=50000)
         self.assertEqual(wandb.save("weights.pt"), [])
         wandb.save("report.json")
