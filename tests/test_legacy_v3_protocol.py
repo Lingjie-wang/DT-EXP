@@ -2,7 +2,9 @@
 
 import importlib.util
 import json
+import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -105,6 +107,81 @@ class LegacyProtocolTests(unittest.TestCase):
                                      model == legacy.expected_gpu(seed, stage))
         with self.assertRaises(RuntimeError):
             legacy.hardware_record("NVIDIA A100", 3, "prepare")
+
+    def test_replay_original_seed_commands(self):
+        ignored = {"--config_path", "--group", "--name", "--update_steps",
+                   "--pretrained_checkpoint_path", "--preference_arrays_path",
+                   "--reference_checkpoint_path", "--checkpoints_path",
+                   "--checkpoint", "--result_dir", "--wandb_mode",
+                   "--wandb_group", "--wandb_name"}
+        for seed in (0, 1, 2):
+            for stage in legacy.TEMPLATES:
+                args = legacy.command(self.source, stage, seed, self.source / "out",
+                                      profile="replay012")
+                actual = dict(zip(args[1::2], args[2::2]))
+                suffix = "" if seed == 0 and stage in ("prepare", "diagnose") else f"_seed{seed}"
+                filename = legacy.TEMPLATES[stage].replace("_seed1", suffix)
+                body = subprocess.check_output([
+                    "git", "show", f"{legacy.REVISION}:scripts/dt_experiments/{filename}",
+                ], cwd=ROOT, text=True)
+                argv = shlex.split(body.split("\npython ", 1)[1].replace("\\\n", " "))
+                original = dict(zip(argv[1::2], argv[2::2]))
+                for key in set(original) - ignored:
+                    self.assertEqual(actual[key], original[key], (seed, stage, key))
+                if stage in ("dt", "v3"):
+                    self.assertEqual(actual["--update_steps"], "100001")
+                elif stage == "prepare":
+                    self.assertEqual(actual["--update_steps"], "50001")
+                self.assertNotIn("--paired_resume", actual)
+                self.assertIn("Replay012", str(args))
+        with self.assertRaises(ValueError):
+            legacy.command(self.source, "v3", 3, self.source / "out", profile="replay012")
+
+    def test_replay_hardware_is_not_relaxed(self):
+        for seed in (0, 1, 2):
+            for stage in ("prepare", "dt", "v3"):
+                wanted = "RTX 4090" if (seed, stage) in ((0, "dt"), (2, "v3")) else "RTX 3090"
+                data = legacy.hardware_record("NVIDIA GeForce " + wanted, seed,
+                                              stage, "replay012")
+                self.assertTrue(data["matches_historical_gpu"])
+                other = "RTX 3090" if wanted == "RTX 4090" else "RTX 4090"
+                with self.assertRaises(RuntimeError):
+                    legacy.hardware_record(other, seed, stage, "replay012")
+
+    def test_replay_cannot_use_existing_legacy_directory(self):
+        result = subprocess.run([
+            sys.executable, str(ROOT / "scripts/dt_experiments/legacy_v3_high.py"),
+            "prepare", "--profile", "replay012", "--seed", "0", "--root", str(self.source),
+        ], text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("different protocol", result.stderr)
+
+    def test_original_comparison_is_read_only(self):
+        try:
+            import numpy as np
+            import torch
+        except ImportError:
+            self.skipTest("Checkpoint-comparison test also runs in server PyTorch environment")
+        old = self.source / "old.pt"
+        new = self.source / "new.pt"
+        pairs = self.source / "pairs.npz"
+        checkpoint = {"model_state": {"weight": torch.ones(3)}, "next_step": 50000,
+                      "state_mean": np.zeros(2), "state_std": np.ones(2)}
+        torch.save(checkpoint, old)
+        checkpoint["model_state"]["weight"][0] = 2
+        torch.save(checkpoint, new)
+        np.savez(pairs, valid_branch=np.array([True, False]))
+        legacy.write_json(self.source / "original_inputs.json", {"0": {
+            "checkpoint": str(old), "checkpoint_sha256": legacy.digest(old),
+            "pairs": str(pairs), "pairs_sha256": legacy.digest(pairs),
+        }})
+        before = old.read_bytes(), pairs.read_bytes()
+        report = legacy.compare_original(self.source, 0, new, pairs)
+        self.assertFalse(report["model_tensors_equal"])
+        self.assertEqual(report["max_abs_tensor_difference"], 1.0)
+        self.assertTrue(report["pair_arrays_equal"])
+        self.assertEqual(report["valid_pairs_old_new"], [1, 1])
+        self.assertEqual(before, (old.read_bytes(), pairs.read_bytes()))
 
     def test_logger_survives_init_rebinding_and_blocks_binary_upload(self):
         logged, saved = [], []

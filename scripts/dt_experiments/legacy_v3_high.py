@@ -19,6 +19,17 @@ REVISION = "25626cefd9465dadbd0a6ef95756ab943ca7fab6"
 CONTROL_REVISION = "e8126627628ebf2e928796e8a5db3f81fbcd3aa3"
 CAMPAIGN = "v3-high-legacy345-20260920"
 GROUP = "Legacy012-V3High-Seeds345-To100k-HCMR-delayed"
+PROFILES = {
+    "legacy345": {
+        "seeds": (3, 4, 5), "campaign": CAMPAIGN, "group": GROUP,
+        "prefix": "Legacy012", "strict_gpu": False,
+    },
+    "replay012": {
+        "seeds": (0, 1, 2), "campaign": "v3-high-replay012-20260921",
+        "group": "Replay012-OriginalV3High-To100k-HCMR-delayed",
+        "prefix": "Replay012", "strict_gpu": True,
+    },
+}
 TEMPLATES = {
     "prepare": "prepare_dt50k_pair_diagnostic_seed1.sbatch",
     "diagnose": "run_dt_pair_diagnostic_seed1.sbatch",
@@ -81,20 +92,26 @@ def paths(root, seed, smoke=False):
     return directory, directory / "dt-step50000.pt", directory / "pairs"
 
 
-def expected_gpu(seed, stage):
-    # Historical reference only; the user now permits either supported GPU.
+def expected_gpu(seed, stage, profile="legacy345"):
+    # Replay uses the original seed numbers; legacy345 maps 0/1/2 -> 3/4/5.
+    if profile == "replay012":
+        seed += 3
     newer = (stage == "dt" and seed == 3) or (stage == "v3" and seed == 5)
     return "RTX 4090" if newer else "RTX 3090"
 
 
-def hardware_record(gpu, seed, stage):
+def hardware_record(gpu, seed, stage, profile="legacy345"):
     if not any(model in gpu for model in ("RTX 3090", "RTX 4090")):
         raise RuntimeError(f"Unsupported GPU for this campaign: {gpu}")
-    historical = expected_gpu(seed, stage)
+    historical = expected_gpu(seed, stage, profile)
+    strict = PROFILES[profile]["strict_gpu"]
+    if strict and historical not in gpu:
+        raise RuntimeError(f"Historical GPU required: {historical}; got {gpu}")
     return {
         "gpu": gpu, "historical_gpu": historical,
         "matches_historical_gpu": historical in gpu,
-        "policy": "user-approved-3090-or-4090-single-gpu",
+        "policy": ("historical-model-matched-single-gpu" if strict else
+                   "user-approved-3090-or-4090-single-gpu"),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "node": os.environ.get("SLURMD_NODENAME"),
     }
@@ -108,10 +125,11 @@ def set_flag(argv, key, value):
         argv.extend([key, str(value)])
 
 
-def command(source, stage, seed, directory, smoke=False):
+def command(source, stage, seed, directory, smoke=False, profile="legacy345"):
     """Mechanically reuse seed-1 launcher; leave all unlisted arguments alone."""
-    if seed not in (3, 4, 5):
-        raise ValueError("This campaign must only run seeds 3/4/5")
+    settings = PROFILES[profile]
+    if seed not in settings["seeds"]:
+        raise ValueError(f"Invalid seed {seed} for profile {profile}")
     script = source / "scripts/dt_experiments" / TEMPLATES[stage]
     body = script.read_text().split("\npython ", 1)[1].replace("\\\n", " ")
     argv = shlex.split(body.replace("${PROJECT}", str(source)))
@@ -121,16 +139,16 @@ def command(source, stage, seed, directory, smoke=False):
     pair_file = pairs / (
         f"dt_pair_diagnostic_halfcheetah_medium_replay_delayed_seed{seed}.npz"
     )
-    name = f"Legacy012-{stage}-seed{seed}-HCMR-delayed"
+    name = f"{settings['prefix']}-{stage}-seed{seed}-HCMR-delayed"
     if smoke:
         name = "Smoke-" + name
     if stage == "diagnose":
         overrides = dict(
             checkpoint=checkpoint, seed=seed, result_dir=pairs,
-            wandb_mode="disabled", wandb_group=GROUP, wandb_name=name,
+            wandb_mode="disabled", wandb_group=settings["group"], wandb_name=name,
         )
     else:
-        overrides = dict(train_seed=seed, group=GROUP, name=name)
+        overrides = dict(train_seed=seed, group=settings["group"], name=name)
         if stage == "prepare":
             overrides.update(
                 preference_pair_seed=seed, reference_checkpoint_path=checkpoint,
@@ -212,11 +230,11 @@ def worker(args, root):
     source, revision = source_for(root, args.stage)
     hashes = verify_source(source, revision)
     gpu = torch.cuda.get_device_name(0)
-    hardware = hardware_record(gpu, args.seed, args.stage)
+    hardware = hardware_record(gpu, args.seed, args.stage, args.profile)
     directory, _, _ = paths(root, args.seed, args.smoke)
     record = directory / "records" / args.stage
     record.mkdir(parents=True, exist_ok=False)
-    argv = command(source, args.stage, args.seed, directory, args.smoke)
+    argv = command(source, args.stage, args.seed, directory, args.smoke, args.profile)
     write_json(record / "command.json", argv)
     write_json(record / "hardware.json", hardware)
     install_observer(wandb, record, hashes, revision, hardware)
@@ -233,9 +251,10 @@ def worker(args, root):
         raise
 
 
-def run_stage(root, stage, seed, smoke):
+def run_stage(root, stage, seed, smoke, profile="legacy345"):
     argv = [sys.executable, str(Path(__file__).resolve()), "worker",
-            "--root", str(root), "--seed", str(seed), "--stage", stage]
+            "--root", str(root), "--seed", str(seed), "--stage", stage,
+            "--profile", profile]
     if smoke:
         argv.append("--smoke")
     subprocess.run(argv, check=True)
@@ -249,7 +268,59 @@ def rows(record):
     return merged
 
 
-def prepare(root, seed, smoke):
+def compare_original(root, seed, checkpoint, pair_file):
+    """Read-only CPU comparison AFTER training/mining subprocesses have exited."""
+    import numpy as np
+    import torch
+
+    original = read_json(root / "original_inputs.json")[str(seed)]
+    for key in ("checkpoint", "pairs"):
+        if digest(original[key]) != original[key + "_sha256"]:
+            raise RuntimeError(f"Original seed-{seed} input changed: {key}")
+    old = torch.load(original["checkpoint"], map_location="cpu")
+    new = torch.load(checkpoint, map_location="cpu")
+    a, b = old["model_state"], new["model_state"]
+    if a.keys() != b.keys():
+        raise RuntimeError("Old/new model state structures differ")
+    different = [key for key in a if not torch.equal(a[key], b[key])]
+    maximum = max((a[key].float() - b[key].float()).abs().max().item()
+                  for key in a)
+    with np.load(original["pairs"]) as pa, np.load(pair_file) as pb:
+        pair_keys_equal = set(pa.files) == set(pb.files)
+        different_arrays = [key for key in set(pa.files) & set(pb.files)
+                            if not np.array_equal(pa[key], pb[key], equal_nan=True)]
+        counts = [int(pa["valid_branch"].sum()), int(pb["valid_branch"].sum())]
+    return {
+        "original": original, "model_tensors_equal": not different,
+        "different_model_tensors": different, "max_abs_tensor_difference": maximum,
+        "next_steps": [old["next_step"], new["next_step"]],
+        "normalization_equal": all(np.array_equal(old[k], new[k])
+                                   for k in ("state_mean", "state_std")),
+        "pair_keys_equal": pair_keys_equal,
+        "pair_arrays_equal": pair_keys_equal and not different_arrays,
+        "different_pair_arrays": sorted(different_arrays),
+        "valid_pairs_old_new": counts,
+        "note": "File hashes include config/path/serialization metadata; compare tensors and arrays instead.",
+    }
+
+
+def original_inputs():
+    manifest = {}
+    for seed in (0, 1, 2):
+        checkpoint = PROJECT / "checkpoints" / (
+            f"dt-halfcheetah-medium-replay-v2-delayed-seed{seed}-step50000.pt"
+        )
+        pairs = PROJECT / "results/pair_diagnostics" / (
+            f"dt_pair_diagnostic_halfcheetah_medium_replay_delayed_seed{seed}.npz"
+        )
+        manifest[str(seed)] = {
+            "checkpoint": str(checkpoint), "checkpoint_sha256": digest(checkpoint),
+            "pairs": str(pairs), "pairs_sha256": digest(pairs),
+        }
+    return manifest
+
+
+def prepare(root, seed, smoke, profile="legacy345"):
     import numpy as np
     import torch
 
@@ -257,14 +328,14 @@ def prepare(root, seed, smoke):
     verify_source(source)
     directory, checkpoint, pairs = paths(root, seed, smoke)
     directory.mkdir(parents=True, exist_ok=False)
-    run_stage(root, "prepare", seed, smoke)
+    run_stage(root, "prepare", seed, smoke, profile)
     loaded = torch.load(checkpoint, map_location="cpu")
     start = 2 if smoke else 50000
     if loaded["next_step"] != start or loaded["config"]["train_seed"] != seed:
         raise RuntimeError("Wrong historical warmup checkpoint")
     if "rng_state" in loaded:
         raise RuntimeError("Unexpected modern checkpoint format")
-    diagnostic = command(source, "diagnose", seed, directory, smoke)
+    diagnostic = command(source, "diagnose", seed, directory, smoke, profile)
     subprocess.run([sys.executable, *diagnostic], cwd=source, check=True)
     pair_file = pairs / (
         f"dt_pair_diagnostic_halfcheetah_medium_replay_delayed_seed{seed}.npz"
@@ -280,21 +351,26 @@ def prepare(root, seed, smoke):
         "valid_pair_count": valid, "next_step": start,
         "gpu": torch.cuda.get_device_name(0),
     })
+    if profile == "replay012" and not smoke:
+        write_json(directory / "original_comparison.json",
+                   compare_original(root, seed, checkpoint, pair_file))
 
 
-def branch(root, seed, arm, smoke):
+def branch(root, seed, arm, smoke, profile="legacy345"):
     if arm not in ("dt", "v3"):
         raise ValueError("A continuation branch must be dt or v3")
     if not smoke:
         gate = read_json(root / "smoke/passed.json")
         if gate.get("control_revision") != CONTROL_REVISION or not gate["passed"]:
             raise RuntimeError("Complete archived-control GPU smoke has not passed")
+        if gate.get("profile", "legacy345") != profile:
+            raise RuntimeError("Wrong campaign smoke gate")
     directory, _, _ = paths(root, seed, smoke)
     prepared = read_json(directory / "prepared.json")
     for key in ("checkpoint", "pairs"):
         if digest(prepared[key]) != prepared[key + "_sha256"]:
             raise RuntimeError(f"Changed branch input: {key}")
-    run_stage(root, arm, seed, smoke)
+    run_stage(root, arm, seed, smoke, profile)
     record = directory / "records" / arm
     merged = rows(record)
     first, last = (2, 4) if smoke else (50000, 100000)
@@ -327,14 +403,31 @@ def branch(root, seed, arm, smoke):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("init", "prepare", "branch", "worker", "smoke"))
-    parser.add_argument("--root", type=Path, default=PROJECT / "results" / CAMPAIGN)
-    parser.add_argument("--seed", type=int, choices=(3, 4, 5), default=3)
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="legacy345")
+    parser.add_argument("--root", type=Path)
+    parser.add_argument("--seed", type=int)
     parser.add_argument("--stage", choices=("prepare", "dt", "v3"), default="v3")
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
+    settings = PROFILES[args.profile]
+    if args.seed is None:
+        args.seed = settings["seeds"][0]
+    if args.seed not in settings["seeds"]:
+        parser.error(f"Seed {args.seed} does not belong to {args.profile}")
+    if args.root is None:
+        args.root = PROJECT / "results" / settings["campaign"]
     root = args.root.resolve()
+    if args.mode != "init":
+        manifest = root / "protocol.json"
+        recorded = read_json(manifest)["profile"] if manifest.exists() else "legacy345"
+        if recorded != args.profile:
+            raise RuntimeError("Campaign directory belongs to a different protocol")
     if args.mode == "init":
+        originals = original_inputs() if args.profile == "replay012" else None
         root.mkdir(parents=True, exist_ok=False)
+        write_json(root / "protocol.json", {"profile": args.profile, **settings})
+        if originals is not None:
+            write_json(root / "original_inputs.json", originals)
         subprocess.run(["git", "worktree", "add", "--detach", str(root / "source"),
                         REVISION], cwd=PROJECT, check=True)
         write_json(root / "source_manifest.json", verify_source(root / "source"))
@@ -349,16 +442,19 @@ def main():
     elif args.mode == "prepare":
         if not read_json(root / "smoke/passed.json")["passed"]:
             raise RuntimeError("Historical GPU smoke has not passed")
-        prepare(root, args.seed, False)
+        if read_json(root / "smoke/passed.json").get("profile", "legacy345") != args.profile:
+            raise RuntimeError("Wrong campaign smoke gate")
+        prepare(root, args.seed, False, args.profile)
     elif args.mode == "branch":
-        branch(root, args.seed, args.stage, False)
+        branch(root, args.seed, args.stage, False, args.profile)
     else:
-        prepare(root, args.seed, True)
+        prepare(root, args.seed, True, args.profile)
         for arm in ("dt", "v3"):
-            branch(root, args.seed, arm, True)
+            branch(root, args.seed, arm, True, args.profile)
         write_json(root / "smoke/passed.json", {
             "passed": True, "revision": REVISION,
             "control_revision": CONTROL_REVISION, "seed": args.seed,
+            "profile": args.profile,
         })
 
 
