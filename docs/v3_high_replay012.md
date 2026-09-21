@@ -84,3 +84,27 @@ No completed or running legacy345 job is restarted, changed or removed.
 This is a test of historical reproducibility, not a guarantee of reproducing
 the old improvement. Old full runtime source snapshots were not archived for
 every run; the saved Git sources and actual old W&B configs are the evidence.
+
+## Submission record (2026-09-21)
+
+Implementation: `36586fa`. All 13 protocol tests pass in the server's actual
+PyTorch environment (12 pass locally, one PyTorch-dependent test skipped there).
+Repository-wide local Ruff and shell syntax checks pass. The old checkpoint/
+pair self-comparison passes for all three seeds; original strict pair counts
+are 2124, 2122 and 2212 respectively. Original inputs remain unchanged.
+
+GPU smoke **9681** completed on gn4 / RTX 3090, exit 0, elapsed **1m40s**.
+Both archived DT and v3 audits passed; the persisted smoke gate records the
+two source revisions and `profile=replay012`. Smoke data are never reused in
+production, and smoke runs remain offline.
+
+| Seed | New 0-50k warmup + mining | DT 50k-100k | v3-high 50k-100k |
+| --- | --- | --- | --- |
+| 0 | 9682 | 9685 | 9686 |
+| 1 | 9683 | 9687 | 9688 |
+| 2 | 9684 | 9689 | 9690 |
+
+The two seed-0/1 warmups started concurrently on gn4/gn5 (3090). Seed 2 awaits
+an account slot. Each continuation has an `afterok` dependency on its own
+warmup/mining job; historical-model node filters and runtime guards remain in
+effect. This records submission/startup, not completed training results.
