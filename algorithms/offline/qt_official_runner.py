@@ -23,13 +23,12 @@ from pathlib import Path
 import gym
 import numpy as np
 import torch
+import wandb
 from qt_terminal_correction import (
     corrected_trainer_class,
     episode_end_flags,
     patch_episode_ends,
 )
-
-import wandb
 
 UPSTREAM_COMMIT = "cb9e1a4873449b3467f6bf5586e010180d90614c"
 ENV_NAME = "halfcheetah-medium-replay-v2"
