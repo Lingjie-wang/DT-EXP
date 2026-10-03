@@ -51,6 +51,20 @@ def slurm(job):
     return "UNKNOWN"
 
 
+def evaluation_schedule(root, arm, protocol):
+    path = root / "evaluation_schedule.json"
+    if not path.exists():
+        return protocol["eval_updates"], {}
+    schedule = read(path)
+    expected = schedule["arms"][arm]["expected_eval_updates"]
+    metadata = {
+        "requested_eval_updates": schedule["requested_eval_updates"],
+        "unavailable_past_eval_updates": schedule["arms"][arm]["unavailable_past"],
+        "eval_interval": schedule["interval"],
+    }
+    return expected, metadata
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
@@ -118,9 +132,19 @@ def main():
     marker = directory / "cursor.json"
     cursor = read(marker) if marker.exists() else dict(completed_updates=0, evaluated=[])
     work = args.root / args.arm
+    expected_evaluations, schedule_metadata = evaluation_schedule(args.root, args.arm, p)
+    run.config.update(
+        dict(eval_updates=expected_evaluations, **schedule_metadata),
+        allow_val_change=True,
+    )
+    startup_status = (
+        read(work / "status.json")["status"]
+        if (work / "status.json").exists()
+        else "queued"
+    )
     run.summary.update(
         dict(
-            status="queued",
+            status=startup_status,
             completed_updates=cursor["completed_updates"],
             slurm_job_id=args.job,
             interpretation=(
@@ -140,7 +164,8 @@ def main():
         )
         if (
             remote.config.get("reward_mode") == args.arm
-            and remote.summary.get("status") == "queued"
+            and remote.summary.get("status") == startup_status
+            and remote.config.get("eval_updates") == expected_evaluations
         ):
             write(
                 directory / "startup_verification.json",
@@ -149,6 +174,7 @@ def main():
                     url=run.url,
                     reward_mode=remote.config["reward_mode"],
                     total_updates=remote.config["total_updates"],
+                    eval_updates=remote.config["eval_updates"],
                 ),
             )
             break
@@ -220,6 +246,15 @@ def main():
             )
             if failed and status != "completed":
                 status = "job_failed"
+            supplement_status = work / "supplemental/status.json"
+            if supplement_status.exists():
+                supplemental = read(supplement_status)
+                if supplemental["status"] == "failed":
+                    raise RuntimeError(supplemental["error"])
+            if status == "completed" and (
+                sorted(cursor["evaluated"]) != expected_evaluations
+            ):
+                status = "waiting_for_evaluation"
             run.summary.update(
                 dict(
                     status=status,
@@ -242,7 +277,7 @@ def main():
                 previous_status = status
             if status == "completed":
                 assert cursor["completed_updates"] == p["total_updates"]
-                assert sorted(cursor["evaluated"]) == p["eval_updates"]
+                assert sorted(cursor["evaluated"]) == expected_evaluations
                 run.summary["result/final_normalized_score"] = evaluations[-1][
                     "mean_score"
                 ]
@@ -256,7 +291,7 @@ def main():
                     evaluations[-1]["mean_score"],
                     abs_tol=1e-8,
                 )
-                for step in p["eval_updates"]:
+                for step in expected_evaluations:
                     assert (
                         remote.summary[f"tables/episodes_{step}"]["nrows"]
                         == p["eval_episodes"]
@@ -286,7 +321,9 @@ def main():
                     ),
                 )
                 return
-            if failed or state.startswith("COMPLETED"):
+            if failed or (
+                state.startswith("COMPLETED") and status != "waiting_for_evaluation"
+            ):
                 raise RuntimeError(f"Job ended {state} without complete result")
             time.sleep(60)
         raise TimeoutError("One-shot bridge window expired; no training was modified")

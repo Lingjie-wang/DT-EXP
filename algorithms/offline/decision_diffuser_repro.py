@@ -212,7 +212,7 @@ def prepare(root):
         ema_start=2000,
         log_every=100,
         save_every=10000,
-        eval_updates=[100000, 500000, 1000000],
+        eval_updates=list(range(100000, 1000001, 100000)),
         eval_episodes=10,
         eval_seed_start=271828,
         eval_torch_seed=8675309,
