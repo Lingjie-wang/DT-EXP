@@ -1,8 +1,7 @@
-"""Run pinned upstream QT, preserving its training implementation verbatim.
+"""Run pinned QT with logging and an explicit opt-in terminal-reward correction.
 
-The user explicitly chose the uncorrected upstream delayed-reward implementation.
-This adapter adds logging, snapshots and separately named evaluation protocols.
-It is not a reproduction claim for the paper's delayed-reward table.
+The default retains uncorrected upstream training. Corrected runs are separately
+named and record the patch source. Neither mode claims to reproduce Table 4.
 """
 
 import argparse
@@ -24,6 +23,12 @@ from pathlib import Path
 import gym
 import numpy as np
 import torch
+from qt_terminal_correction import (
+    corrected_trainer_class,
+    episode_end_flags,
+    patch_episode_ends,
+)
+
 import wandb
 
 UPSTREAM_COMMIT = "cb9e1a4873449b3467f6bf5586e010180d90614c"
@@ -88,7 +93,7 @@ class TerminalReward(gym.Wrapper):
         return obs, self.episode_return if done else 0.0, done, info
 
 
-def load_upstream(source):
+def load_upstream(source, correct_terminal_rewards=False):
     source = Path(source).resolve()
     commit = subprocess.check_output(
         ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
@@ -114,9 +119,15 @@ def load_upstream(source):
     if sorted(removed) != ["mjrl.utils.gym_env", "torch.utils.tensorboard"]:
         raise RuntimeError("Unexpected upstream entry-point imports")
     tree.body = retained
+    if correct_terminal_rewards:
+        tree = patch_episode_ends(tree)
     module = types.ModuleType("qt_official_experiment")
     module.__file__ = str(source / "experiment.py")
+    module.episode_end_flags = episode_end_flags
     exec(compile(tree, module.__file__, "exec"), module.__dict__)
+    if correct_terminal_rewards:
+        module.Trainer = corrected_trainer_class(module.Trainer)
+        module.corrected_experiment_source = ast.unparse(tree) + "\n"
     manifest = {
         str(path.relative_to(source)): file_hash(path)
         for path in sorted(source.rglob("*.py"))
@@ -186,10 +197,14 @@ def make_instrumented_trainer(upstream, args, output, run):
             self.pre_reward_count = 0
             self.post_reward_count = 0
             self.samples_seen = 0
+            self.episode_end_count = 0
+            self.terminal_reward_target_count = 0
+            self.terminal_target_error = 0.0
 
             def observed_batch(batch_size):
                 batch = original_batch(batch_size)
                 self.last_rewards = batch[2]
+                self.last_dones = batch[4]
                 self.pre_reward_count += int(torch.count_nonzero(batch[2]).item())
                 self.samples_seen += batch_size
                 return batch
@@ -230,6 +245,18 @@ def make_instrumented_trainer(upstream, args, output, run):
                 loss_metric = {key: [] for key in METRICS}
             result = super().train_step(self.recorder, loss_metric)
             self.post_reward_count += int(torch.count_nonzero(self.last_rewards).item())
+            if args.correct_terminal_rewards:
+                ends = self.last_dones[:, -1, 0].bool()
+                self.episode_end_count += int(ends.sum().item())
+                self.terminal_reward_target_count += int((
+                    ends & self.last_critic_mask[:, -1]
+                    & (self.last_rewards[:, -1, 0] != 0)
+                ).sum().item())
+                if ends.any():
+                    error = (
+                        self.last_target_q[ends, -1] - self.last_rewards[ends, -1]
+                    ).abs().max().item()
+                    self.terminal_target_error = max(self.terminal_target_error, error)
             for key in METRICS:
                 value = float(result[key][-1])
                 if not np.isfinite(value):
@@ -247,6 +274,16 @@ def make_instrumented_trainer(upstream, args, output, run):
                     "train/sequences_seen": self.samples_seen,
                     "time/elapsed_seconds": time.time() - self.started,
                 }
+                if args.correct_terminal_rewards:
+                    record.update({
+                        "audit/episode_end_samples_cumulative": self.episode_end_count,
+                        "audit/terminal_reward_targets_cumulative": (
+                            self.terminal_reward_target_count
+                        ),
+                        "audit/terminal_target_abs_error_max": (
+                            self.terminal_target_error
+                        ),
+                    })
                 append_json(output / "metrics.jsonl", record)
                 run.log(record)
                 self.window = {key: [] for key in METRICS}
@@ -313,7 +350,12 @@ def make_instrumented_trainer(upstream, args, output, run):
                 "complete": self.step == args.updates,
                 "best": self.best,
                 "last": record,
-                "known_issue": "upstream_delayed_terminal_reward_excluded_uncorrected",
+                "terminal_reward_correction": args.correct_terminal_rewards,
+                "eta": args.eta,
+                "known_issue": (
+                    None if args.correct_terminal_rewards else
+                    "upstream_delayed_terminal_reward_excluded_uncorrected"
+                ),
             })
             run.log(record)
             # Retain upstream best-checkpoint selection, using the main strict score.
@@ -339,6 +381,8 @@ def main():
     parser.add_argument("--eval-seed", type=int, default=42)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--eta", type=float, default=5.0)
+    parser.add_argument("--correct-terminal-rewards", action="store_true")
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
     args.source = str(Path(args.source).resolve())
@@ -354,9 +398,10 @@ def main():
         raise ValueError("Budgets must be multiples of upstream iteration length")
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=False)
-    upstream, manifest = load_upstream(args.source)
+    upstream, manifest = load_upstream(args.source, args.correct_terminal_rewards)
+    correction = "terminal-corrected" if args.correct_terminal_rewards else "uncorrected"
     variant = {
-        "exp_name": "qt-official-uncorrected", "seed": args.seed,
+        "exp_name": f"qt-official-{correction}", "seed": args.seed,
         "env": "halfcheetah", "dataset": "medium-replay", "mode": "delayed",
         "K": 5, "pct_traj": 1.0, "batch_size": 256, "embed_dim": 256,
         "n_layer": 4, "n_head": 4, "activation_function": "relu", "dropout": 0.1,
@@ -364,7 +409,7 @@ def main():
         "warmup_steps": 10000, "num_eval_episodes": args.eval_episodes,
         "max_iters": 500, "num_steps_per_iter": block_size, "device": args.device,
         "save_path": str(output) + "/", "discount": 0.99, "tau": 0.005,
-        "eta": 5.0, "eta2": 1.0, "lambda": 1.0, "max_q_backup": False,
+        "eta": args.eta, "eta2": 1.0, "lambda": 1.0, "max_q_backup": False,
         "lr_decay": True, "grad_norm": 15.0, "early_stop": True,
         "early_epoch": args.updates // block_size - 1,
         "k_rewards": True, "use_discount": True, "sar": False,
@@ -377,8 +422,18 @@ def main():
         "upstream_source_sha256": manifest,
         "adapter_sha256": file_hash(__file__),
         "adapter": vars(args), "variant": variant,
-        "known_issue": "delayed_terminal_reward_excluded_uncorrected",
-        "parameter_provenance": "released HCMR run.sh (not delayed-tuned)",
+        "known_issue": (
+            None if args.correct_terminal_rewards else
+            "delayed_terminal_reward_excluded_uncorrected"
+        ),
+        "terminal_reward_correction": args.correct_terminal_rewards,
+        "parameter_provenance": (
+            "released HCMR run.sh with user-selected eta=0.01 and terminal correction; "
+            "not a verified Table 4 configuration"
+            if args.correct_terminal_rewards and args.eta == 0.01 else
+            "released HCMR run.sh with explicit eta override; not delayed-tuned"
+            if args.eta != 5.0 else "released HCMR run.sh (not delayed-tuned)"
+        ),
         "reward_mode": "delayed", "env_name": ENV_NAME,
         "comparison_warning": "different model/batch/context/inference from CORL DT",
         "package_versions": {
@@ -395,15 +450,38 @@ def main():
         trajectories = pickle.load(stream)
     config["num_trajectories"] = len(trajectories)
     config["num_transitions"] = sum(len(x["rewards"]) for x in trajectories)
+    if args.correct_terminal_rewards:
+        patch_path = Path(__file__).with_name("qt_terminal_correction.py")
+        config["terminal_correction_sha256"] = file_hash(patch_path)
+        config["episode_end_semantics"] = (
+            "all dataset trajectory ends, including timeouts"
+        )
+        (output / "terminal_correction.py").write_text(patch_path.read_text())
+        (output / "corrected_train_step.py").write_text(
+            upstream.Trainer.corrected_train_step_source
+        )
+        (output / "corrected_experiment.py").write_text(
+            upstream.corrected_experiment_source
+        )
+    (output / "runner_source.py").write_text(Path(__file__).read_text())
     json_write(output / "config.json", config)
+    if args.correct_terminal_rewards:
+        group = f"QT-TerminalCorrected-eta{args.eta:g}-HCMR-delayed"
+        tags = ["QT", "terminal-corrected", "delayed", f"eta-{args.eta:g}"]
+    else:
+        group = "QT-Official-Uncorrected-HCMR-delayed"
+        tags = ["QT", "official-uncorrected", "delayed", "terminal-reward-issue"]
+    budget = (
+        f"{args.updates // 1000}k" if args.updates % 1000 == 0 else str(args.updates)
+    )
     run = wandb.init(
         project="CORL-DDR", entity="2820402607-shandong-university",
-        group="QT-Official-Uncorrected-HCMR-delayed",
-        name=f"QT-Official-Uncorrected-HCMR-delayed-seed{args.seed}-100k",
+        group=group,
+        name=f"{group}-seed{args.seed}-{budget}",
         config=config, dir=str(output),
         mode="offline" if args.smoke else "online",
         settings=wandb.Settings(disable_code=True),
-        tags=["QT", "official-uncorrected", "delayed", "terminal-reward-issue"],
+        tags=tags,
     )
     run.define_metric("update_step")
     run.define_metric("*", step_metric="update_step")

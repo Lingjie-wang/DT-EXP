@@ -150,3 +150,69 @@ W&B：[QT-Official-Uncorrected-HCMR-delayed-seed0-100k](https://wandb.ai/2820402
 启动前本地使用与 GitHub CI 相同的 Ruff 0.0.278 对完整工作目录检查通过。
 
 这里记录的是启动状态，不是训练已经完成，也不是已经得到有效提升。
+
+## 2026-10-03：末端奖励修正 + eta=0.01 重跑
+
+用户明确要求修复末端奖励处理并把 eta 改为 0.01，重新运行 HCMR sparse。
+新实验名称：`QT-TerminalCorrected-eta0.01-HCMR-delayed-seed0-100k`。
+这是修正版实验，eta=0.01 是用户指定值，不宣称它就是论文 HCMR sparse 的参数。
+
+只改变训练边界/Q target 处理与 eta；保留 seed 0 随机初始化、原始数据、K=5、
+batch=256、网络、学习率、gamma=0.99、EMA、100k 更新数，以及每 5k 更新进行
+100 episodes 的三种主评测口径。100k 的 upstream-feedback 诊断仍为 10 episodes。
+因此这次与旧 run 的比较同时涉及两项变化，不能单独归因于其中一项。
+
+修复位于 `algorithms/offline/qt_terminal_correction.py`，通过显式
+`--correct-terminal-rewards --eta 0.01` 启用：
+
+1. 采样器根据 `si + 实际窗口长度 == 轨迹长度` 标记 episode end，覆盖原始
+   terminals 未标记的 time limit。复制 dones 后才修改，原缓存不变；零回报轨迹
+   也按边界判断，不通过奖励是否非零推断结束。
+2. 终止窗口保留末端奖励，最后一步监督 `Q(s_last, a_last) = r_last`，向前按
+   `y_t = r_t + gamma * y_(t+1)` 传播；终止处不 bootstrap。
+3. 非终止窗口维持原有语义：最后一个观测作为 bootstrap state，其动作的 reward
+   不进入该窗口目标，critic 不监督这个末尾位置。padding 不进入 critic loss。
+4. 原版 checkout 不修改，仍校验固定提交和 clean diff。通过带结构检查的 AST
+   只替换 get_batch 的边界标记和 train_step 的 Q target / critic loss；actor loss、
+   两套 optimizer、EMA、target 更新、推理代码沿用 upstream。
+
+这里把每条离线轨迹（包括 1000 步 time limit）当作 delayed 回报的有限 episode，
+在其边界发放奖励并停止 bootstrap；不是无限时域 time-limit bootstrap 设定。
+原版未修正模式仍可由旧脚本启动。
+
+除原来的奖励计数外，新 run 记录：
+
+- `audit/episode_end_samples_cumulative`
+- `audit/terminal_reward_targets_cumulative`
+- `audit/terminal_target_abs_error_max`（必须为 0）
+
+结果目录保存 adapter 源码、修复源码、展开后的 corrected experiment/train_step
+以及全部配置和哈希，以便审阅运行时的实际实现。
+
+验证包括 15 个测试：手算折扣目标、无终止 bootstrap 泄漏、零/负末端奖励、
+单个有效 token、真实 upstream sampler 的完整/左 padding 边界、非终止更新与
+upstream 一致、末端奖励实际改变 critic 更新，以及原有评测/RNG 测试。
+
+启动脚本：`scripts/dt_experiments/run_qt_corrected_eta001_hcmr_seed0.sbatch`。
+同一 Slurm allocation 内先执行测试，再用完整模型和 batch 跑 20 updates 的 offline
+smoke 和四种评测（各 1 episode）。验证奖励保留计数=末端监督计数>0、目标误差=0、
+全部 loss/权重有限且 checkpoint 可加载后，才从头启动 online W&B 的 100k 训练。
+smoke 失败则脚本立即退出，不启动正式训练。
+
+本地 15 个机制测试已全部通过，改动文件的 Ruff 0.0.278、Python 编译和 shell 语法
+检查通过。全仓库 Ruff 仍有本任务之外的既有问题，未修改其他实验。
+登录节点导入完整 MuJoCo 环境会尝试构建 CPU 后端，因缺少 `GL/osmesa.h` 失败；
+未安装或替换依赖。GPU 完整 smoke 留在作业内执行，不能把机制测试当作 GPU smoke
+已通过。正式提交使用独立源码快照和 SHA-256 清单，后续工作区改动不影响排队任务。
+
+提交记录：2026-10-03 16:19:55（Asia/Shanghai），Slurm job **12045**，GPUNorm，
+1 GPU / 6 CPU / 32 GiB / 24 小时。提交后状态为 `PENDING (AssocMaxJobsLimit)`，
+表示账号并行作业数已达上限，尚未开始 GPU smoke 或正式训练，尚无新 W&B run URL。
+当前已有作业不变；获得配额后自动执行上述 smoke → 校验 → 正式训练流程。
+
+- 提交配置：`checkpoints/qt-terminal-corrected-eta001/submission-20261003-161928/submission.json`
+- 源码快照：同目录 `source/`；SHA-256 清单：同目录 `source.sha256`
+- 日志：`logs/qt-corrected-12045.out`
+- smoke：`checkpoints/qt-terminal-corrected-eta001/job-12045/smoke/`
+- 正式结果：`checkpoints/qt-terminal-corrected-eta001/job-12045/train/`
+- 正式 W&B 链接由训练入口写入正式结果目录的 `wandb_run.json`。

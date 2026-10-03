@@ -10,6 +10,7 @@ import gym
 import numpy as np
 import torch
 from qt_official_runner import isolated_evaluation, TerminalReward
+from qt_terminal_correction import corrected_trainer_class
 
 SOURCE = Path(os.environ.get("QT_SOURCE", "third_party/QT")).resolve()
 
@@ -71,7 +72,7 @@ class UpstreamBehaviorTests(unittest.TestCase):
             scale=1000.0,
         )
 
-    def one_update(self, reward_position):
+    def one_update(self, reward_position, corrected=False, episode_end=False):
         torch.manual_seed(7)
         np.random.seed(7)
         actor, critic = self.model(), self.critic_class(3, 2, hidden_dim=16)
@@ -80,11 +81,17 @@ class UpstreamBehaviorTests(unittest.TestCase):
         rewards = torch.zeros(4, 5, 1)
         if reward_position is not None:
             rewards[:, reward_position] = 1000.0
+        dones = torch.zeros(4, 5, 1).long()
+        dones[:, -1] = int(episode_end)
         batch = (
-            states, actions, rewards, actions.clone(), torch.zeros(4, 5, 1).long(),
+            states, actions, rewards, actions.clone(), dones,
             torch.ones(4, 6, 1), torch.arange(5).repeat(4, 1), torch.ones(4, 5),
         )
-        trainer = self.trainer_class(
+        trainer_class = (
+            corrected_trainer_class(self.trainer_class)
+            if corrected else self.trainer_class
+        )
+        trainer = trainer_class(
             model=actor, critic=critic, batch_size=4, tau=0.005, discount=0.99,
             get_batch=lambda _: batch, loss_fn=None, eta=5.0, eta2=1.0,
             grad_norm=15.0, scale=1000.0, k_rewards=True, use_discount=True,
@@ -96,6 +103,21 @@ class UpstreamBehaviorTests(unittest.TestCase):
         weights = torch.cat([p.detach().flatten() for p in critic.parameters()])
         actor_weights = torch.cat([p.detach().flatten() for p in actor.parameters()])
         return result, weights, actor_weights, rewards
+
+    def test_corrected_terminal_reward_changes_critic_update(self):
+        zero = self.one_update(None, corrected=True, episode_end=True)
+        terminal = self.one_update(-1, corrected=True, episode_end=True)
+        self.assertNotEqual(zero[0]["critic_loss"], terminal[0]["critic_loss"])
+        self.assertFalse(torch.equal(zero[1], terminal[1]))
+        self.assertEqual(torch.count_nonzero(terminal[3]).item(), 4)
+
+    def test_corrected_nonterminal_update_matches_upstream(self):
+        original = self.one_update(-2)
+        corrected = self.one_update(-2, corrected=True)
+        for key in original[0]:
+            np.testing.assert_allclose(original[0][key], corrected[0][key], rtol=1e-6)
+        torch.testing.assert_close(original[1], corrected[1], rtol=1e-5, atol=1e-7)
+        torch.testing.assert_close(original[2], corrected[2], rtol=1e-5, atol=1e-7)
 
     def test_upstream_terminal_reward_is_ignored_not_silently_fixed(self):
         zero = self.one_update(None)
