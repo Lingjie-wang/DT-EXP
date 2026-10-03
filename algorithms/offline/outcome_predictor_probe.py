@@ -19,8 +19,6 @@ import h5py
 import numpy as np
 import torch
 from torch import nn
-from torch.nn import functional as F
-
 
 def dump(path, value):
     Path(path).write_text(json.dumps(value, indent=2, default=str) + "\n")
@@ -402,7 +400,6 @@ def replay(args):
             total += float(reward) / config["reward_scale"]
             if done:
                 break
-        expected = next(iter(by_episode[ep].values()))[0]
         # All rows have a branch-specific return; get candidate zero explicitly.
         group0 = next(iter(by_episode[ep].values()))
         expected_return = float(next(r for r in group0 if int(r["candidate_id"]) == 0)["branch_full_return"])

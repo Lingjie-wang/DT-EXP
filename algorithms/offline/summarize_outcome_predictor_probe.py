@@ -4,10 +4,8 @@ import json
 from pathlib import Path
 
 import numpy as np
-import torch
-
 import outcome_predictor_probe as probe
-
+import torch
 
 @torch.no_grad()
 def offline(root):
