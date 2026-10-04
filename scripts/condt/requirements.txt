@@ -1,0 +1,29 @@
+# Preserve the working MuJoCo runtime inherited from adt-delayed.
+torch==1.11.0+cu113
+numpy==1.23.1
+gym==0.23.0
+mujoco-py==2.1.2.14
+Cython==0.29.36
+h5py==3.11.0
+wandb==0.17.4
+
+# Author dependency versions where practical; deviations are recorded by setup.
+transformers==4.11.3
+ray==1.12.0
+pytorch-metric-learning==1.3.0
+pandas==1.4.1
+scipy==1.9.3
+scikit-learn==1.1.3
+protobuf==3.20.3
+grpcio==1.43.0
+tensorboardX==2.5
+
+# Transformers 4.11.x requires the old tokenizers API.
+tokenizers==0.10.3
+huggingface-hub==0.10.1
+
+# setup_runtime.sh installs these separately with --no-deps to avoid replacing
+# the working simulator stack. D4RL is locally reinstalled to exclude an older
+# import-order patch in the inherited base environment.
+# d4rl==1.1
+# mjrl @ git+https://github.com/aravindr93/mjrl.git@3871d93763d3b49c4741e6daeaebbc605fe140dc
