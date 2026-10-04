@@ -122,3 +122,33 @@ values, no episode-boundary leakage, score-based matching, reconstruction from
 the saved value model, isolated RNG, and full predecessor-chain completion.
 Retain the existing C gradient and dense-context tests. Run Ruff 0.0.278 against
 a clean tracked export before each publication and inspect GitHub Actions after.
+
+## Installed deployment (2026-10-05)
+
+Execution source is frozen at
+`cb0191f1a4b89c6ce539a75d7eda24bc64a61d7f`. All 36 relevant tests and clean-export
+Ruff 0.0.278 passed. [GitHub Actions passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37218569397).
+
+Two isolated server CPU smokes completed: two value epochs, two policy updates,
+batch 8 / auxiliary batch 4, one real evaluation episode. The zero-weight DT
+ended with every model tensor exactly equal to the existing dense CPU DT after
+two updates. Both new variants had the same first DT loss as that control, and
+configuration, initialization, data, packages and shared-source checks passed.
+The C run's saved V tensors were identical before and after policy updates.
+The 161/41 trajectory split was verified disjoint.
+
+[W&B validation run](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/oxrcybyw)
+finished successfully. Independent API reads confirmed value history, validation
+curve, diagnostics and step-2 evaluation, plus the artifact containing frozen V,
+per-state values/scores, pair data, report and provenance. This is a short
+execution/upload check, not a formal policy result. Local verification is saved
+on the server in
+`results/mc-value-preference-cpu-smoke-c-20261005/deployment_verified.json`.
+
+Tmux queue `mc-value-preference-queue-20261005`, PID `602774`, was installed and
+verified `waiting` for single-step queue PID `602164`. Its manifest pins both
+published revisions. No formal MC-value trial has started. The GPU was still
+running only the original delayed-C recovery process. Scheduled order:
+delayed C recovery -> dense RTG C -> dense DT -> single-step reward C -> frozen
+MC-value C. The full 50-epoch V fit and 100k-update policy run begin only after
+the preceding campaigns finish successfully.
