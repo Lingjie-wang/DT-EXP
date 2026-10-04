@@ -110,3 +110,26 @@ per-episode results, immutable checkpoints and provenance remain available.
 Commit/publish each completed source change promptly; do not rely on continued
 server access. Before pushing, run Ruff 0.0.278 on a clean tracked export and
 inspect GitHub Actions after publication. Keep unrelated working-tree changes.
+
+## Launched run (2026-10-04)
+
+- W&B: [C seed 0, live metrics](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/xl40z503).
+- Execution source: `2e75f26aa388a47ab8d0fa40ccab54d6eb566759`, published to
+  GitHub before launch; its [CI passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37209976867).
+- Server project: `/home/sckd02/workspace/DT-EXP`; frozen source worktree:
+  `.runtime/state-only-c-source-2e75f26`. No changes to the original worktree.
+- Output: `results/state-only-c-5090-seed0-20261004` under that server project.
+  Log: `logs/state-only-c-5090-seed0-20261004.log`.
+- Detached tmux session: `state-only-c-seed0-20261004`. Training and W&B use
+  direct connections and do not depend on the installation proxy or SSH session.
+- Startup audit: full-batch CUDA smoke, one 1000-step rollout, checkpoint state
+  and W&B episode table verified. Formal training progressed past 1,300 updates
+  with finite metrics. W&B API readback independently verified steps 1/100/200/300,
+  6,768 pairs and the exact execution commit. This records launch verification,
+  not a completed 100k run or a final policy score.
+
+Historical B reference:
+[hard-positive seed 0](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/f3737b2b-6aeb-444f-b9ea-6e60e962f156).
+Its saved config confirms `pretrained_checkpoint_path` at 50k,
+`preference_start_step=50000` and `reference_weight=0.1`; it is not the proposed
+from-scratch, unweighted B with the new state-only pair pool. Only C was launched.
