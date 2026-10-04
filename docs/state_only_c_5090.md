@@ -54,6 +54,28 @@ MuJoCo archive SHA256: `a436ca2f4144c38b837205635bbd60ffe1162d5b44c87df222327959
 System OpenGL/OSMesa build dependencies may be needed; record any compatibility
 work and verify actual CUDA forward/backward plus a real simulator rollout.
 
+The tested runtime is Python 3.10.21, Torch 2.7.1+cu128 and W&B 0.30.0.
+`scripts/state_only_c/requirements-lock.txt` records the installed packages;
+the local Torch wheel path is replaced with its public version. Install Torch
+from the CUDA 12.8 index above before applying the lock. The official Linux
+CPython 3.10 Torch wheel SHA256 is
+`d6c3cba198dc93f93422a8545f48a6697890366e4b9701f54351fc27e2304bd3`.
+The final runtime passes `pip check`.
+
+Compatibility record: the first smoke failed before training with
+`No module named 'six'` during D4RL's MuJoCo registration, followed by
+`gym.error.NameNotFound: Environment halfcheetah-medium-replay doesn't exist`.
+Installing `six==1.17.0`, imported by MJRL, resolved it. D4RL's declared
+dm-control/MuJoCo/PyBullet dependencies are pinned above. No upstream source
+patches or monkey patches were applied. Missing optional Flow/CARLA imports
+do not affect this task.
+
+The retry `state-only-c-5090-smoke-20261004-v2`, using source `8570b99`,
+completed three CUDA updates with the full 4096/256 batches and a real
+1000-step HalfCheetah rollout. Losses and gradients were finite; the pair pool
+contained 6,768 pairs. Six core tests passed on the server. This is execution
+validation only, not an experiment score.
+
 ```bash
 .runtime/state-only-c-5090-env/bin/python -m unittest discover \
   -s tests -p test_state_only_preference.py -v
