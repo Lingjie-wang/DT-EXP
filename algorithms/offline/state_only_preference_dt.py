@@ -223,7 +223,7 @@ def train(config: StateOnlyConfig):
                         "train/next_learning_rate": scheduler.get_last_lr()[0],
                         "time/elapsed_seconds": time.monotonic() - start_time,
                     }
-                    run.log(metrics, step=step)
+                    run.log(metrics, step=step, commit=False)
                     metrics_file.write(json.dumps({"step": step, **metrics}) + "\n")
                     write_json(root / "status.json", {
                         "state": "training", "completed_updates": step,
@@ -257,18 +257,23 @@ def train(config: StateOnlyConfig):
                         "eval/12000_return_mean": float(np.mean(episode_returns)),
                         "eval/12000_return_std": float(np.std(episode_returns)),
                     }
-                    run.log(metrics, step=step)
+                    run.log(metrics, step=step, commit=False)
                     run.log({f"episodes/step_{step:06d}": wandb.Table(
                         columns=["episode", "return", "normalized_score", "length"],
                         data=[[i, float(r), float(s), float(n)] for i, (r, s, n)
                               in enumerate(zip(episode_returns, scores, lengths))],
-                    )}, step=step)
+                    )}, step=step, commit=False)
                     metrics_file.write(json.dumps({"step": step, **metrics}) + "\n")
                     print(f"EVAL {step} " + json.dumps(metrics), flush=True)
                     restore_rng(saved_rng)
                     model.train()
                 if step % config.checkpoint_every == 0 or step == config.update_steps:
                     checkpoint(step)
+                # Flush once per completed update. Separate committed log() calls
+                # at the same step would discard evaluation values and tables.
+                if (step == 1 or step % config.log_every == 0
+                        or step % config.eval_every == 0 or step == config.update_steps):
+                    run.log({}, step=step)
         summary = {
             "completed_updates": step,
             "last_score": evaluations[-1]["normalized_score_mean"],
