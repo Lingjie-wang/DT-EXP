@@ -1,5 +1,17 @@
 # Project version control
 
+## Preserve historical experiments
+
+The user requires new experimental work to preserve existing code and results.
+Add independent entry points, configurations, and output directories for new
+methods or reproductions. Do not overwrite, replace, or repurpose historical
+experiment implementations, configurations, checkpoints, or result directories.
+Apply a fix to existing experiment code only when the user explicitly requests
+that fix; otherwise, implement the change in a separately named version. Keep
+unrelated working-tree changes intact. Record this constraint in future handoffs.
+
+## Publish completed changes
+
 The user requires every completed code change in this project to be recorded on
 GitHub. After each coherent change and the appropriate validation, create a Git
 commit and push it to the project's existing GitHub remote without asking for
