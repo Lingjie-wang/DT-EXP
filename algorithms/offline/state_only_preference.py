@@ -3,6 +3,23 @@
 import numpy as np
 import torch.nn.functional as F
 
+def validate_resume_config(current, saved, completed):
+    """Permit operational changes, but never silently change the training method."""
+    operational = {
+        "name", "group", "project", "wandb_entity", "wandb_mode", "output_dir",
+        "eval_every", "eval_episodes", "log_every", "checkpoint_every", "update_steps",
+        "resume_checkpoint", "attention_backend", "checkpoints_path",
+    }
+    for key, old in saved.items():
+        new = current.get(key)
+        if isinstance(old, (tuple, list)) and isinstance(new, (tuple, list)):
+            old, new = tuple(old), tuple(new)
+        if key not in operational and old != new:
+            raise ValueError(f"Resume changes training setting {key}: {old} -> {new}")
+    if not 0 <= completed < current["update_steps"]:
+        raise ValueError("Resume step must precede the requested final update")
+
+
 def mine_pairs(trajectories, state_mean, state_std, max_distance=0.5):
     """One exact nearest low-return state at the SAME timestep per high state.
 

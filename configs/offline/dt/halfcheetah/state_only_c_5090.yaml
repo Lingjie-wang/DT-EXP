@@ -23,7 +23,8 @@ state_max_rmse: 0.5
 preference_weight: 0.05
 preference_margin: 0.05
 target_returns: [12000.0]
-eval_every: 20000
+eval_every: 10000
+attention_backend: math
 eval_episodes: 100
 log_every: 100
 checkpoint_every: 5000

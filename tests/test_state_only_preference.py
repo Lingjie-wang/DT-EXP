@@ -9,7 +9,12 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "algorithms/offline"))
-from state_only_preference import mine_pairs, preference_batch, single_sided_loss
+from state_only_preference import (
+    mine_pairs,
+    preference_batch,
+    single_sided_loss,
+    validate_resume_config,
+)
 
 def trajectory(states, actions, total):
     return {"observations": np.array(states, dtype=np.float32).reshape(-1, 1),
@@ -18,6 +23,21 @@ def trajectory(states, actions, total):
 
 
 class StateOnlyPreferenceTests(unittest.TestCase):
+    def test_resume_allows_cadence_but_rejects_method_changes(self):
+        saved = {"eval_every": 20000, "preference_weight": 0.05,
+                 "batch_size": 4096, "update_steps": 100000, "betas": [0.9, 0.999]}
+        current = {**saved, "eval_every": 10000, "betas": (0.9, 0.999)}
+        validate_resume_config(current, saved, 5000)
+        for key, value in (("preference_weight", 0.01), ("batch_size", 1024)):
+            with self.assertRaisesRegex(ValueError, key):
+                validate_resume_config({**current, key: value}, saved, 5000)
+
+    def test_resume_rejects_completed_or_invalid_steps(self):
+        config = {"update_steps": 100000}
+        for completed in (-1, 100000, 100001):
+            with self.assertRaisesRegex(ValueError, "Resume step"):
+                validate_resume_config(config, config, completed)
+
     def setUp(self):
         self.data = [trajectory([0, 0.1, 0.2], [1, 1, 1], 10),
                      trajectory([0.1, 0.2, 0.3], [-1, -1, -1], 0)]

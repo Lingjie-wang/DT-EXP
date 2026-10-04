@@ -29,7 +29,12 @@ from dt import (
     TrainConfig,
     wrap_env,
 )
-from state_only_preference import mine_pairs, preference_batch, single_sided_loss
+from state_only_preference import (
+    mine_pairs,
+    preference_batch,
+    single_sided_loss,
+    validate_resume_config,
+)
 from top_return_weighted_dt import model_hash, restore_rng, rng_state
 from torch.utils.data import DataLoader
 
@@ -41,7 +46,7 @@ class StateOnlyConfig(TrainConfig):
     batch_size: int = 4096
     learning_rate: float = 0.0008
     target_returns: Tuple[float, ...] = (12000.0,)
-    eval_every: int = 20000
+    eval_every: int = 10000
     output_dir: str = ""
     preference_batch_size: int = 256
     preference_weight: float = 0.05
@@ -53,6 +58,8 @@ class StateOnlyConfig(TrainConfig):
     wandb_entity: str = "2820402607-shandong-university"
     group: str = "StateOnly-C-HCMR-delayed-5090-20261004"
     name: str = "StateOnly-C"
+    resume_checkpoint: str = ""
+    attention_backend: str = "math"
 
 
 def write_json(path, value):
@@ -81,6 +88,14 @@ def train(config: StateOnlyConfig):
     if min(config.update_steps, config.eval_every, config.eval_episodes,
            config.log_every, config.checkpoint_every) <= 0:
         raise ValueError("Training, evaluation and saving intervals must be positive")
+    if config.attention_backend not in {"auto", "math"}:
+        raise ValueError("attention_backend must be auto or math")
+    if config.attention_backend == "math":
+        # Public PyTorch backend controls; no modifications to the DT architecture.
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_cudnn_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
     root = Path(config.output_dir).resolve()
     root.mkdir(parents=True, exist_ok=False)
     (root / "checkpoints").mkdir()
@@ -90,6 +105,7 @@ def train(config: StateOnlyConfig):
     run = None
     env = None
     step = 0
+    completed_updates = 0
     try:
         set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
         dataset = SequenceDataset(
@@ -128,6 +144,24 @@ def train(config: StateOnlyConfig):
         scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda updates: min((updates + 1) / config.warmup_steps, 1)
         )
+        resumed = None
+        if config.resume_checkpoint:
+            resumed = torch.load(config.resume_checkpoint, map_location="cpu",
+                                 weights_only=False)
+            completed_updates = resumed["completed_updates"]
+            validate_resume_config(asdict(config), resumed["config"], completed_updates)
+            if not (np.array_equal(dataset.state_mean, resumed["state_mean"])
+                    and np.array_equal(dataset.state_std, resumed["state_std"])):
+                raise ValueError("Resume dataset normalization differs")
+            if resumed["provenance"]["pairs_sha256"] != file_hash(root / "pairs.npz"):
+                raise ValueError("Resume pair pool differs")
+            model.load_state_dict(resumed["model_state"])
+            optimizer.load_state_dict(resumed["optimizer_state"])
+            scheduler.load_state_dict(resumed["scheduler_state"])
+            pair_rng.set_state(resumed["pair_rng_state"])
+            loader_generator.set_state(resumed["loader_generator_state"])
+            if not all(torch.isfinite(p).all() for p in model.parameters()):
+                raise ValueError("Resume model contains nonfinite parameters")
         project = Path(__file__).resolve().parents[2]
         source_files = [Path(__file__),
                         Path(__file__).with_name("state_only_preference.py"),
@@ -147,7 +181,17 @@ def train(config: StateOnlyConfig):
                          ("torch", "numpy", "gym", "d4rl", "mujoco-py", "wandb")},
             "gpu": torch.cuda.get_device_name() if torch.cuda.is_available() else None,
             "cuda": torch.version.cuda,
+            "attention_backend": config.attention_backend,
         }
+        if resumed is not None:
+            provenance["recovery"] = {
+                "checkpoint_sha256": file_hash(config.resume_checkpoint),
+                "completed_updates": completed_updates,
+                "parent_run_id": resumed["wandb_run_id"],
+                "parent_git_commit": resumed["provenance"]["git_commit"],
+                "worker_sampling": "New worker streams; prefetch state was not saved. "
+                                   "Not an exact replay of the interrupted run.",
+            }
         write_json(root / "provenance.json", provenance)
         run = wandb.init(
             entity=config.wandb_entity, project=config.project, group=config.group,
@@ -179,14 +223,17 @@ def train(config: StateOnlyConfig):
             torch.save(saved, str(path) + ".tmp")
             os.replace(str(path) + ".tmp", path)
 
-        checkpoint(0)
+        if resumed is not None:
+            restore_rng(resumed["rng_state"])
+        checkpoint(completed_updates)
         iterator = iter(loader)
         evaluations = []
         with (root / "metrics.jsonl").open("a", buffering=1) as metrics_file:
-            for step in range(1, config.update_steps + 1):
+            for step in range(completed_updates + 1, config.update_steps + 1):
                 states, actions, returns, times, mask = [
                     item.to(config.device) for item in next(iterator)
                 ]
+                before_forward_rng = rng_state()
                 prediction = model(states, actions, returns, times, ~mask.bool())
                 dt_loss = (F.mse_loss(prediction, actions.detach(), reduction="none")
                            * mask.unsqueeze(-1)).mean()
@@ -205,12 +252,24 @@ def train(config: StateOnlyConfig):
                 if not torch.isfinite(loss):
                     raise FloatingPointError(f"Nonfinite loss at update {step}")
                 optimizer.zero_grad()
-                loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), config.clip_grad, error_if_nonfinite=True
-                )
+                try:
+                    loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), config.clip_grad, error_if_nonfinite=True
+                    )
+                except RuntimeError:
+                    torch.save({
+                        "step": step, "model_state": model.state_dict(),
+                        "batch": [states, actions, returns, times, mask],
+                        "auxiliary": [ps, pa, pr, pt, pm, target_index, negative],
+                        "rng_state": before_forward_rng, "config": asdict(config),
+                    }, root / "failure_batch.pt")
+                    # Gradients have not been applied; retain the last valid state.
+                    checkpoint(completed_updates)
+                    raise
                 optimizer.step()
                 scheduler.step()
+                completed_updates = step
                 if step == 1 or step % config.log_every == 0:
                     metrics = {
                         "train/dt_loss": dt_loss.item(),
@@ -282,17 +341,24 @@ def train(config: StateOnlyConfig):
             ])),
             "elapsed_seconds": time.monotonic() - start_time,
         }
+        late = [e["normalized_score_mean"] for e in evaluations
+                if e["step"] in (60000, 80000, 100000)]
+        if len(late) == 3:
+            summary["late_60_80_100k_mean"] = float(np.mean(late))
         write_json(root / "summary.json", summary)
         run.summary.update(summary)
         run.finish()
         write_json(root / "status.json", {"state": "completed", **summary})
     except BaseException as error:
-        write_json(root / "status.json", {
+        failure = {
             "state": "failed", "last_loop_step": step,
+            "completed_updates": completed_updates,
             "error_type": type(error).__name__,
             "error": str(error),
-        })
+        }
+        write_json(root / "status.json", failure)
         if run is not None:
+            run.summary["failure"] = failure
             run.finish(exit_code=1)
         raise
     finally:

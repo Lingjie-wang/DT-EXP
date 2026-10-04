@@ -25,7 +25,7 @@ establish a controlled improvement over A/B by comparing their old scores.
 - Train from random initialization for 100,000 completed updates, seed 0 only.
   Ordinary batch 4096; CORL architecture/AdamW/dropout/LR warmup are unchanged.
   There is no checkpoint warm-start or delayed activation of the auxiliary loss.
-- Evaluate fixed RTG 12000 every 20k, 100 episodes, seed 42, constant delayed RTG.
+- Evaluate fixed RTG 12000 every 10k, 100 episodes, seed 42, constant delayed RTG.
   Primary: final 100k score; secondary: mean of the 60k/80k/100k scores. No best
   checkpoint selection. Environment episode dispersion is not training-seed error.
 
@@ -133,3 +133,60 @@ Historical B reference:
 Its saved config confirms `pretrained_checkpoint_path` at 50k,
 `preference_start_step=50000` and `reference_weight=0.1`; it is not the proposed
 from-scratch, unweighted B with the new state-only pair pool. Only C was launched.
+
+## Interrupted first run and recovery
+
+The initial `xl40z503` run stopped at update 8,043 before applying the optimizer
+step: `clip_grad_norm_(error_if_nonfinite=True)` detected a nonfinite gradient
+norm. Its final logged loss at 8k was finite (DT 0.06106, preference 0.01030).
+The server had ample disk/RAM and the process exited with code 1; W&B finished
+uploading the failure run. The latest periodic checkpoint is step 5,000.
+Keep that run and its frozen source/output directory intact.
+
+At the user's request, evaluations now run every 10k updates, 100 episodes each.
+Final 100k remains primary, and `late_60_80_100k_mean` keeps the original secondary
+60k/80k/100k statistic. The diagnostic `last_three_eval_mean` now represents the
+last three evaluations (80k/90k/100k under the new cadence).
+
+Recovery uses `--resume_checkpoint` with a NEW output directory and W&B run.
+It validates the method, pair pool and normalization, restores model/optimizer/
+scheduler and saved RNG state, and retains total update numbering. Worker
+prefetch state was not saved, so new worker streams are used: this is a disclosed
+recovery branch, not an exact replay. Failure checks stay enabled; a future
+backward failure saves its inputs and the last valid optimizer checkpoint before
+exiting. Failure details are also uploaded to the W&B summary.
+
+`state_only_gradient_diagnostic.py` runs an isolated replay from a checkpoint,
+saves the first bad batch and model, and compares default versus math SDPA
+backward passes on the captured inputs. Its outputs are diagnostic artifacts,
+not additional training seeds or experimental results.
+
+The isolated replay reproduced the failure at total update 8,156 on Torch
+2.7.1+cu128 / RTX 5090. The captured parameters and per-element gradients were
+finite, but the default attention backward produced a gradient L2 norm of
+1.108e20 (measured in float64); the float32 norm reduction overflowed. Replaying
+the SAME model/input with math SDPA yielded norm 1.770. Ordinary DT alone gave
+1.108e20 versus 1.714; preference alone gave 933.3 versus 0.0725. Different backend
+dropout draws can change exact losses, so these are diagnostic comparisons, not
+claims of bitwise equivalence. The issue points to the accelerated attention
+backward in this runtime, rather than a nonfinite dataset or the preference loss.
+
+A further controlled replay disabled every dropout ONLY in the diagnostic model:
+efficient SDPA still gave norm 7.983e15, while math SDPA gave 1.817. Thus the huge
+gradient difference persists without dropout randomness. The captured batch,
+model and JSON reports are retained in the ignored diagnostic output directory.
+
+The recovery explicitly sets `attention_backend: math` using public PyTorch
+backend controls, disabling accelerated SDPA paths. No upstream DT source is
+patched. Architecture, batches, losses, learning rate, clipping and evaluation
+protocol remain the same apart from the requested 10k interval. Floating-point
+arithmetic and dropout random streams can differ; the recovered run records this
+compatibility change and its checkpoint lineage. Do not disable the nonfinite
+gradient guard, zero bad gradients, or skip bad updates to hide this failure.
+
+Validation: all eight unit tests passed on the server and locally; the clean
+tracked export passes Ruff 0.0.278. Recovery smoke completed updates 5001–5003
+with full 4096/256 batches and a real 1000-step rollout. The recovery's starting
+model and every optimizer tensor exactly matched the original step-5000 file,
+and scheduler state matched as well. This smoke's single episode is not the
+formal 100-episode evaluation.
