@@ -1,0 +1,16 @@
+# Torch is installed separately from the CUDA 12.8 wheel index.
+numpy==1.23.5
+gym==0.23.0
+mujoco-py==2.1.2.14
+Cython==0.29.37
+h5py==3.14.0
+pyrallis==0.3.1
+scipy==1.10.1
+patchelf==0.17.2.4
+termcolor==2.4.0
+click>=8.0
+wandb>=0.22
+setuptools<81
+wheel
+# D4RL 1.1 and MJRL are installed without their unrelated full training stack.
+# Save the actual complete environment with pip freeze before launch.
