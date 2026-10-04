@@ -126,8 +126,8 @@ sbatch results/condt-author-hopper-medium-seed0-20261004-gpu/source/run.sbatch \
 
 ## W&B
 
-拟使用现有 `2820402607-shandong-university/CORL-DDR`，采用新的独立 group
-和稳定 run ID。确认目的地后，在登录节点启动各组的冻结桥接脚本；本次已排队
+使用用户明确授权的现有 `2820402607-shandong-university/CORL-DDR`，采用新的独立
+group 和稳定 run ID。在登录节点启动各组的冻结桥接脚本；本次已排队
 campaign 的安全观测版本单独保存在 `observation-v2/`：
 
 ```bash
@@ -164,7 +164,17 @@ campaign 的安全观测版本单独保存在 `observation-v2/`：
 2026-10-04 18:36（Asia/Shanghai）提交 GPU 作业 **12258（DT）** 与
 **12259（ConDT）**，提交时均为 `PENDING (Priority)`。没有取消或更改历史任务。
 
-最初的 W&B 启动被自动审批拒绝，要求明确确认目标项目及上传范围。已向用户
-请求确认现有 `CORL-DDR` 项目和上述限定指标范围；得到确认前不会重试在线上传。
-旧的冻结桥接源码保留用于追溯，正式在线桥接将使用独立的 `observation-v2/`
-快照，上传白名单配置和指标，不执行旧版 artifact 上传逻辑。
+最初的 W&B 启动被自动审批拒绝，要求明确确认目标项目及上传范围。用户随后
+明确授权上传到现有 `CORL-DDR` 项目，范围为上述白名单配置和指标。
+旧的冻结桥接源码保留用于追溯，正式在线桥接使用独立的 `observation-v2/`
+快照，不执行旧版 artifact 上传逻辑。
+
+两组在线记录：
+
+- [DT，job 12258](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/45723770892a0108)
+- [ConDT，job 12259](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/681293b2ee9b7bd1)
+
+运行创建时正式作业仍为 `PENDING (Priority)`，已有记录为实验配置及排队状态，
+没有正式训练损失或评测成绩。两个独立桥接进程在登录节点持续读取新增结果；
+启动核验保存在 `wandb_sync/{dt,condt}/startup_verification.json`，最终核验需等
+训练完成后才会生成。进程 PID、授权范围及启动信息保存在 `observation-v2/`。
