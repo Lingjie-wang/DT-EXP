@@ -41,6 +41,8 @@ FlashAttention；本轮固定这些依赖。Python 3.9 替代 3.8 以复用已�
 Transformers 4.37.0 release 替代未指定提交的 4.37.0.dev0，Gym-v3 使用
 MuJoCo 2.1/mujoco-py。不能把这些环境差异描述成逐位一致的原始运行环境。
 完整实际包版本写入运行目录。官方源码零修改不等于保证论文分数可复现。
+独立环境重新安装未修改的 D4RL 1.1，避免继承旧环境的注册顺序补丁；
+dm-control、pybullet 等其他任务的可选模拟器依赖未安装，HalfCheetah 使用 Gym-v3。
 
 ## 执行与审计
 

@@ -10,5 +10,7 @@ ENV_DIR="$PROJECT/.runtime/lpt-official-env"
 "$ENV_DIR/bin/python" -m pip install -r "$PROJECT/scripts/lpt_official/requirements.txt"
 "$ENV_DIR/bin/python" -m pip install --no-deps \
     'https://github.com/Dao-AILab/flash-attention/releases/download/v2.3.6/flash_attn-2.3.6%2Bcu118torch2.0cxx11abiFALSE-cp39-cp39-linux_x86_64.whl'
+# The shared environment has an old D4RL import-order patch. Install the released
+# package locally instead; optional non-HalfCheetah simulator dependencies are unused.
+"$ENV_DIR/bin/python" -m pip install --no-deps --ignore-installed 'd4rl==1.1'
 "$ENV_DIR/bin/python" -m pip freeze > "$ENV_DIR/installed-packages.txt"
-
