@@ -1,0 +1,19 @@
+# Original Torch version; CUDA wheel is installed separately by setup_runtime.sh.
+numpy==1.24.4
+transformers==4.37.0
+accelerate==0.26.1
+datasets==2.16.1
+pyarrow==14.0.2
+einops==0.7.0
+gym==0.23.1
+h5py==3.10.0
+huggingface-hub==0.20.3
+triton==2.0.0
+pandas==2.0.3
+tqdm==4.65.0
+sympy==1.12
+networkx==3.1
+jinja2==3.1.6
+cmake==3.27.9
+lit==16.0.6
+ninja==1.11.1.1

@@ -10,6 +10,16 @@ Apply a fix to existing experiment code only when the user explicitly requests
 that fix; otherwise, implement the change in a separately named version. Keep
 unrelated working-tree changes intact. Record this constraint in future handoffs.
 
+## Faithful paper reproductions
+
+论文复现默认保留官方源代码、原始配置、训练流程和评测流程。非必要不修改
+上游代码，也不通过 monkey patch 或重写外围流程悄悄改变算法行为。
+优先通过独立运行环境解决依赖和硬件兼容问题。确实无法运行时，仅做最小必要
+的兼容修改，明确记录原始报错、修改位置及行为影响；未验证等价性的版本不能
+称为未经修改的官方复现。疑似算法错误、性能优化和额外“修复”应另建独立对照，
+不得混入官方基线。用户要求的任务、数据集和奖励设置变更应单独记录。
+复现结果不达标时，先核查与官方的差异，不默认修改算法或用较高分替代忠实性。
+
 ## Publish completed changes
 
 The user requires every completed code change in this project to be recorded on
