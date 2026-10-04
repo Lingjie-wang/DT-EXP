@@ -216,3 +216,38 @@ smoke 失败则脚本立即退出，不启动正式训练。
 - smoke：`checkpoints/qt-terminal-corrected-eta001/job-12045/smoke/`
 - 正式结果：`checkpoints/qt-terminal-corrected-eta001/job-12045/train/`
 - 正式 W&B 链接由训练入口写入正式结果目录的 `wandb_run.json`。
+
+## 2026-10-04：作业 12045 的网络失败与独立重试入口
+
+Slurm 确认 12045 于 11:29:45 在 gn7 启动，11:32:08 以 `FAILED / 1:0` 退出
+（Asia/Shanghai）。15 个机制测试和 20 updates 的 GPU smoke 已通过，四种评测
+各 1 episode 完成；27 个非零末端奖励全部保留并进入 critic 监督，末端目标误差
+为 0，初始和 20 步 checkpoint 的 actor/critic/target/EMA 权重均有限。
+
+正式阶段尚未开始更新：入口在 `wandb.init()` 中报 `ProxyError` 并于 90 秒超时。
+具体原因是作业继承了提交端的 `HTTP_PROXY/HTTPS_PROXY`（及小写变量），指向
+`127.0.0.1:17897`；计算节点不存在这个代理，日志为 `Connection refused`。
+因此旧 train 目录只有初始化配置，没有训练指标或 checkpoint。
+
+新增独立入口
+`scripts/dt_experiments/run_qt_corrected_eta001_hcmr_seed0_direct.sbatch`：
+
+- 只在重试进程内清除大小写 HTTP/HTTPS/ALL proxy 变量，不修改系统代理。
+- 先探测到 W&B API 的直接 HTTPS 连接；未认证 GET `/graphql` 返回 405 属正常。
+- 再执行原冻结启动脚本，完整保留其 smoke → 校验 → 正式训练流程。
+- 重试沿用 2026-10-03 已验证的训练源码快照；训练、数据、eta、种子、预算与
+  评测设置不变。原作业、源码快照和结果全部保留，新作业使用独立 job 目录。
+
+登录节点直连 W&B API 检查已通过；计算节点的连接结果和正式 W&B run 是否创建，
+须以重试日志为准。
+
+重试于 2026-10-04 15:10:36 提交为 Slurm job **12177**；提交后查询为
+`PENDING (Priority)`，尚未获得节点。没有取消或调整其他作业。
+
+- 重试提交记录：`checkpoints/qt-terminal-corrected-eta001/submission-direct-20261004-151031/submission.json`
+- 该目录 `source/` 中训练 runner、terminal correction、原启动脚本逐字节匹配
+  第一次提交的冻结源码；新 direct 启动脚本与源码一起记录 SHA-256。
+- 日志：`logs/qt-corrected-direct-12177.out`
+- 结果：`checkpoints/qt-terminal-corrected-eta001/job-12177/{smoke,train}/`
+- 验证：shell 语法、六个代理变量不会传入训练子进程、网络失败时不启动训练，
+  以及干净 tracked checkout 中与 GitHub 相同的 Ruff 检查均通过。
