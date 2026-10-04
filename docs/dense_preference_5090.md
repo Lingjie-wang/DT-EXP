@@ -113,3 +113,25 @@ matching, tied labels, unequal horizons, causal dense RTG budgets, right padding
 detached-negative gradients, and completion/failure/final-evaluation queue gates.
 Before publication, run the repository Ruff 0.0.278 check on a clean export of
 tracked files. Inspect GitHub Actions after each push.
+
+## Deployed queue (2026-10-05, Asia/Shanghai)
+
+- Execution source: `e6401b2891235ef078354ff4ca73b9db9ad34eaf`, published before
+  deployment; [GitHub Actions passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37216138132).
+- Frozen server source: `/home/sckd02/workspace/DT-EXP/.runtime/dense-preference-source-e6401b2`.
+- Detached tmux session: `dense-preference-queue-20261005`; log under the server
+  project: `logs/dense-preference-queue-20261005.log`.
+- Campaign output: `results/dense-preference-5090-seed0-20261005`. Verified state
+  `waiting`; dependency is the existing `g2256klc` recovery. The original training
+  was at 49.2k updates during verification and remained the only GPU process.
+- Twenty relevant tests passed: nine dense/queue tests, eight historical C
+  gradient/mining tests, and three original/delayed reward/evaluation tests.
+  Both CPU smokes completed two updates and one real 1000-step rollout. Initial
+  model, dataset, pair and source hashes matched, as did the first DT loss.
+- [W&B upload validation](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/fugmaxlf)
+  is a two-update CPU smoke in `DensePreference-Validation-20261005`, not a formal
+  score. API readback verified evaluation at step 2, the episode table and the
+  preference-pair artifact. C's CPU smoke used disabled W&B.
+- Full-batch GPU smokes and both formal runs are queued after successful current
+  completion. They were not started early; no dense experimental result is yet
+  established by this deployment record.
