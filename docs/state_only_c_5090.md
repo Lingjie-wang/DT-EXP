@@ -190,3 +190,21 @@ with full 4096/256 batches and a real 1000-step rollout. The recovery's starting
 model and every optimizer tensor exactly matched the original step-5000 file,
 and scheduler state matched as well. This smoke's single episode is not the
 formal 100-episode evaluation.
+
+Recovery run: [g2256klc](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/g2256klc),
+using published source `127cbaf836e6eff0c63b6ae558cd61137f7dc35a`
+([passing CI](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37211988398)).
+Its server output directory is `results/state-only-c-5090-seed0-recovery-20261004`,
+log is `logs/state-only-c-5090-seed0-recovery-20261004.log`, and detached tmux
+session is `state-only-c-recovery-20261004`. The recovery W&B config was read back
+to confirm `attention_backend=math`, `eval_every=10000`, checkpoint step 5000,
+and the exact published source commit. The parent run's summary contains both
+diagnostic comparisons and the recovery URL; the new run links back to its parent.
+
+Recovery verification passed both prior failure locations and completed the 10k
+evaluation: 100 episodes, each 1000 steps, normalized score mean 40.22885 and
+episode standard deviation 4.70809; raw return mean 4714.30501. W&B API readback
+confirmed the same score at step 10000 and a 100-row, four-column episode table.
+Training then continued beyond 10,300 updates. The 10k checkpoint and results
+were also backed up locally. This is an intermediate single-training-seed result,
+not the final 100k result or evidence of an improvement over historical controls.
