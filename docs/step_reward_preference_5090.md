@@ -71,7 +71,7 @@ comparison file. It also waits for that queue process to exit. Any prior failure
 halts the appended queue. An exclusive lock prevents duplicate launches; output
 directories are never overwritten or silently restarted.
 
-Planned server paths under `/home/sckd02/workspace/DT-EXP`:
+Server paths under `/home/sckd02/workspace/DT-EXP`:
 
 - Frozen source: `.runtime/step-reward-preference-source-20261005`.
 - Campaign: `results/step-reward-preference-5090-seed0-20261005`.
@@ -101,3 +101,21 @@ prefix independence, negative/tied rewards, invalid data, complete-campaign
 dependency checks, and baseline configuration/shared-code compatibility. Reuse
 the dense-context and detached-gradient tests. Run Ruff 0.0.278 against a clean
 tracked export before publishing; verify GitHub Actions after publication.
+
+## Deployment verification (2026-10-05, Asia/Shanghai)
+
+Execution revision `2775c67e5cd15befbc0109bf745295db816f808d` was published before
+deployment; [GitHub Actions passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37217587785).
+All 26 relevant step-reward/dense-context/legacy-gradient tests and the clean
+tracked export's Ruff check passed. CPU C and zero-weight DT checks each finished
+two updates and one real episode. The zero-weight model after TWO updates was
+tensor-for-tensor identical to the previous dense DT CPU check, and the control
+compatibility guard passed. These checks do not establish a policy improvement.
+
+[W&B validation run](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/80nbsj0y)
+is in `StepRewardPreference-Validation-20261005`, separate from formal results.
+API readback confirmed `preference_label=step_reward`, 2,011 pairs, step-2
+evaluation, the episode table and the single-step reward pair artifact.
+The appended tmux queue was installed to wait for the complete prior campaign;
+its manifest records the exact dependency commit and process identity. Full-batch
+GPU validation and formal seed-0 C remain behind the prior experiments.
