@@ -65,3 +65,32 @@ python3 scripts/late_preference/queue.py \
 Run late-preference, matched-positive, dense-preference and state-only tests, then
 Ruff 0.0.278 against a clean tracked export before publication. Verify GitHub
 Actions and all three GPU smokes before interpreting any formal results.
+
+## Deployment verification (2026-10-05, Asia/Shanghai)
+
+Execution source `d6db68df19848edc8af2e2f8105393f548cbb0e9` was published and
+[GitHub Actions passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37278294625).
+Thirty late-preference/matched-positive/dense/state-only tests and the clean
+tracked export's Ruff 0.0.278 check passed. Three full-batch CUDA smokes each
+completed three updates and evaluations at 0/3 (one episode, offline W&B).
+Cross-child checks verified exact restored parent states, first ordinary batch,
+pair indices, dropout RNG, initial losses and baseline episode returns.
+
+Server source: `.runtime/late-preference-source-d6db68d` beneath the runtime base.
+Campaign: `results/late-preference-5090-seed0-20261005`; tmux session
+`late-preference-queue-20261005`, queue PID 615275; log
+`logs/late-preference-queue-20261005.log`. The queue first completed all smokes,
+then launched formal DT. B and C follow after successful predecessors.
+
+[Formal DT child g9fe4dp1](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/g9fe4dp1)
+reproduced the parent's 100 baseline episode returns (mean normalized score
+38.527685858354396) before updates. Independent direct W&B API readback confirmed
+baseline and step-1000 evaluations match local files and the LR is 1e-4. The SDK
+public API service timed out during the initial read-only check; direct W&B
+GraphQL readback succeeded, and the training upload remained live.
+
+[Saved W&B comparison view](https://forge.coreweave.com/wandb/2820402607-shandong-university/CORL-DDR?nw=8gjbrpa85gn&panelDisplayName=eval%2F12000_normalized_score_mean&panelSectionName=eval)
+uses the name filter `^LatePreference-(dt|b|c)-seed0` and additional-update x-axis.
+At deployment verification DT was evaluating additional step 3000. Formal
+completion and B/C results are not established by this deployment record; inspect
+`queue_status.json`, `children_verified.json` and `comparison.json` for results.
