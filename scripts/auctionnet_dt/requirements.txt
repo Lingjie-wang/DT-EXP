@@ -1,0 +1,9 @@
+# Install torch==2.7.1 from the CUDA 12.8 wheel index separately.
+numpy==1.26.4
+pandas==2.2.3
+gym==0.23.1
+PyYAML==6.0.2
+tensorboardX==2.6.4
+tensorboard==2.19.0
+tqdm==4.67.1
+wandb==0.30.0
