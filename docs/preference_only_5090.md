@@ -1,5 +1,10 @@
 # Preference-only continuation of the completed DT
 
+**Scope correction:** This campaign used ORIGINAL per-step rewards. The user's
+intended research setting is DELAYED rewards, so these results do not answer
+that question. Preserve them as historical records, not delayed-reward evidence.
+The corrected protocol is in [delayed_staged_5090.md](delayed_staged_5090.md).
+
 Test whether removing ordinary DT action regression improves the existing late
 preference fine-tuning. This is an independent C-only arm, not a paper reproduction.
 Historical implementations, checkpoints and experiments remain unchanged.

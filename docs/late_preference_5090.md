@@ -1,5 +1,10 @@
 # Short preference fine-tuning after a completed DT
 
+**Scope correction:** This campaign used ORIGINAL per-step rewards. The user's
+intended research setting is DELAYED rewards, so these results do not answer
+that question. Preserve them as historical records, not delayed-reward evidence.
+The corrected protocol is in [delayed_staged_5090.md](delayed_staged_5090.md).
+
 Test whether positive imitation or negative-gated positive imitation improves an
 already-trained DT. Preserve every historical source, checkpoint and output.
 This is a single-training-seed pilot, not an equal-total-budget test of activation
