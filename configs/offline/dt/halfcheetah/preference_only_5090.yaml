@@ -1,0 +1,38 @@
+# Matched C-only ablation; ordinary DT loss has zero gradient.
+variant: c_only
+env_name: halfcheetah-medium-replay-v2
+reward_mode: original
+train_seed: 0
+eval_seed: 42
+batch_size: 4096
+preference_batch_size: 256
+seq_len: 20
+embedding_dim: 128
+num_layers: 3
+num_heads: 1
+attention_dropout: 0.1
+residual_dropout: 0.1
+embedding_dropout: 0.1
+learning_rate: 0.0001
+betas: [0.9, 0.999]
+weight_decay: 0.0001
+clip_grad: 0.25
+warmup_steps: 10000
+update_steps: 5000
+eval_steps: [0, 1000, 3000, 5000]
+reward_scale: 0.001
+state_max_rmse: 0.5
+preference_weight: 0.05
+preference_margin: 0.05
+target_returns: [12000.0]
+eval_every: 1000
+attention_backend: math
+eval_episodes: 100
+log_every: 100
+checkpoint_every: 1000
+num_workers: 4
+project: CORL-DDR
+wandb_entity: 2820402607-shandong-university
+wandb_mode: online
+group: PreferenceOnly-HCMR-5090-20261005
+name: PreferenceOnly-C-seed0

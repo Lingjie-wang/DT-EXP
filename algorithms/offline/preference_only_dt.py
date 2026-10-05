@@ -1,0 +1,468 @@
+"""Preference-only C fine-tuning: ordinary DT loss is diagnostic only."""
+
+import hashlib
+import importlib.metadata
+import json
+import os
+import platform
+import subprocess
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Tuple
+
+import gym
+import numpy as np
+import pyrallis
+import torch
+import torch.nn.functional as F
+import wandb
+from dense_action_preference import dense_preference_batch, mine_dense_pairs
+from dt import (
+    DecisionTransformer,
+    eval_rollout,
+    SequenceDataset,
+    set_seed,
+    TrainConfig,
+    wrap_env,
+)
+from late_preference import (
+    auxiliary_loss,
+    fingerprint,
+    restore_parent,
+    validate_parent_config,
+    verify_parent_provenance,
+)
+from preference_only import (
+    preference_only_objective,
+    verify_initial,
+    verify_reference,
+)
+from top_return_weighted_dt import model_hash, restore_rng, rng_state
+from torch.utils.data import DataLoader
+
+@dataclass
+class PreferenceOnlyConfig(TrainConfig):
+    env_name: str = "halfcheetah-medium-replay-v2"
+    reward_mode: str = "original"
+    train_seed: int = 0
+    batch_size: int = 4096
+    learning_rate: float = 0.0001
+    target_returns: Tuple[float, ...] = (12000.0,)
+    eval_every: int = 1000
+    update_steps: int = 5000
+    eval_steps: Tuple[int, ...] = (0, 1000, 3000, 5000)
+    parent_checkpoint: str = ""
+    validation_mode: bool = False
+    output_dir: str = ""
+    preference_batch_size: int = 256
+    preference_weight: float = 0.05
+    preference_margin: float = 0.05
+    state_max_rmse: float = 0.5
+    log_every: int = 100
+    checkpoint_every: int = 1000
+    wandb_mode: str = "online"
+    wandb_entity: str = "2820402607-shandong-university"
+    group: str = "PreferenceOnly-HCMR-5090-20261005"
+    name: str = "PreferenceOnly-C"
+    variant: str = "c_only"
+    reference_dir: str = ""
+    resume_checkpoint: str = ""
+    attention_backend: str = "math"
+
+
+def write_json(path, value):
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def file_hash(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@pyrallis.wrap()
+def train(config: PreferenceOnlyConfig):
+    if not config.output_dir:
+        raise ValueError("Choose a NEW output_dir; historical results cannot be reused")
+    if (config.env_name != "halfcheetah-medium-replay-v2"
+            or config.reward_mode != "original"):
+        raise ValueError("This version is defined for original-reward HCMR only")
+    if config.variant != "c_only" or config.preference_weight != 0.05:
+        raise ValueError("This ablation requires c_only with preference weight 0.05")
+    if not config.reference_dir:
+        raise ValueError("A completed matched LatePreference C reference is required")
+    if not config.parent_checkpoint or config.resume_checkpoint:
+        raise ValueError("Choose a completed DT parent; child resume is unsupported")
+    if not config.validation_mode and (
+            config.update_steps != 5000 or config.eval_episodes != 100
+            or tuple(config.eval_steps) != (0, 1000, 3000, 5000)
+            or config.learning_rate != 0.0001):
+        raise ValueError("Formal: 5k updates, 100 episodes, 0/1k/3k/5k, LR 1e-4")
+    if (not config.eval_steps or config.eval_steps[0] != 0
+            or config.eval_steps[-1] != config.update_steps
+            or sorted(set(config.eval_steps)) != list(config.eval_steps)):
+        raise ValueError("Evaluation steps must be unique, ordered, from 0 to final")
+    if tuple(config.target_returns) != (12000.0,):
+        raise ValueError("C uses the predeclared RTG 12000 only")
+    if min(config.update_steps, config.eval_every, config.eval_episodes,
+           config.log_every, config.checkpoint_every) <= 0:
+        raise ValueError("Training, evaluation and saving intervals must be positive")
+    if config.attention_backend not in {"auto", "math"}:
+        raise ValueError("attention_backend must be auto or math")
+    if config.attention_backend == "math":
+        # Public PyTorch backend controls; no modifications to the DT architecture.
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_cudnn_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+    root = Path(config.output_dir).resolve()
+    root.mkdir(parents=True, exist_ok=False)
+    (root / "checkpoints").mkdir()
+    (root / "evaluations").mkdir()
+    write_json(root / "config.json", asdict(config))
+    write_json(root / "status.json", {"state": "preparing", "completed_updates": 0})
+    run = None
+    env = None
+    step = 0
+    completed_updates = 0
+    try:
+        set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
+        dataset = SequenceDataset(
+            config.env_name, config.seq_len, config.reward_scale, config.reward_mode
+        )
+        pairs, distances, pair_stats = mine_dense_pairs(
+            dataset.dataset, dataset.state_mean, dataset.state_std, config.state_max_rmse
+        )
+        rtg_gaps = np.array([
+            dataset.dataset[p]["returns"][t] - dataset.dataset[n]["returns"][u]
+            for p, t, n, u in pairs
+        ], dtype=np.float32)
+        np.savez_compressed(root / "pairs.npz", pairs=pairs, state_rmse=distances,
+                            rtg_gap=rtg_gaps)
+        write_json(root / "pair_stats.json", pair_stats)
+        print("PAIR_STATS " + json.dumps(pair_stats), flush=True)
+        env = wrap_env(
+            gym.make(config.env_name), dataset.state_mean, dataset.state_std,
+            config.reward_scale,
+        )
+        loader_generator = torch.Generator().manual_seed(config.train_seed)
+        loader = DataLoader(
+            dataset, batch_size=config.batch_size, num_workers=config.num_workers,
+            pin_memory=True, generator=loader_generator,
+        )
+        pair_rng = np.random.RandomState(config.train_seed + 10000)
+        set_seed(config.train_seed, deterministic_torch=config.deterministic_torch)
+        model = DecisionTransformer(
+            state_dim=env.observation_space.shape[0],
+            action_dim=env.action_space.shape[0], embedding_dim=config.embedding_dim,
+            seq_len=config.seq_len, episode_len=config.episode_len,
+            num_layers=config.num_layers, num_heads=config.num_heads,
+            attention_dropout=config.attention_dropout,
+            residual_dropout=config.residual_dropout,
+            embedding_dropout=config.embedding_dropout, max_action=config.max_action,
+        ).to(config.device)
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=config.learning_rate, betas=config.betas,
+            weight_decay=config.weight_decay,
+        )
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lambda updates: min((updates + 1) / config.warmup_steps, 1)
+        )
+        parent_path = Path(config.parent_checkpoint).resolve()
+        parent_root = parent_path.parent.parent
+        resumed = torch.load(parent_path, map_location="cpu", weights_only=False)
+        validate_parent_config(asdict(config), resumed["config"],
+                               resumed["completed_updates"])
+        parent_status = json.loads((parent_root / "status.json").read_text())
+        if (parent_status["state"] != "completed"
+                or parent_status["completed_updates"] != 100000):
+            raise ValueError("Parent DT has not completed 100k")
+        if not (np.array_equal(dataset.state_mean, resumed["state_mean"])
+                and np.array_equal(dataset.state_std, resumed["state_std"])):
+            raise ValueError("Parent dataset normalization differs")
+        transfer = restore_parent(model, optimizer, scheduler, resumed,
+                                  config.learning_rate)
+        pair_rng.set_state(resumed["pair_rng_state"])
+        loader_generator.set_state(resumed["loader_generator_state"])
+        project = Path(__file__).resolve().parents[2]
+        source_files = [Path(__file__),
+                        Path(__file__).with_name("state_only_preference.py"),
+                        Path(__file__).with_name("matched_positive.py"),
+                        Path(__file__).with_name("late_preference.py"),
+                        Path(__file__).with_name("preference_only.py"),
+                        Path(__file__).with_name("dense_action_preference.py"),
+                        Path(__file__).with_name("dt.py"),
+                        Path(__file__).with_name("top_return_weighted_dt.py")]
+        provenance = {
+            "git_commit": subprocess.check_output(
+                ["git", "-C", str(project), "rev-parse", "HEAD"], text=True
+            ).strip(),
+            "source_sha256": {str(p.relative_to(project)): file_hash(p)
+                              for p in source_files},
+            "dataset_sha256": file_hash(env.dataset_filepath),
+            "pairs_sha256": file_hash(root / "pairs.npz"),
+            "initial_model_sha256": model_hash(model),
+            "python": platform.python_version(),
+            "packages": {name: importlib.metadata.version(name) for name in
+                         ("torch", "numpy", "gym", "d4rl", "mujoco-py", "wandb")},
+            "gpu": torch.cuda.get_device_name() if torch.cuda.is_available() else None,
+            "cuda": torch.version.cuda,
+            "attention_backend": config.attention_backend,
+        }
+        verify_parent_provenance(resumed["provenance"], provenance)
+        provenance["fine_tuning"] = {
+            "parent_checkpoint_sha256": file_hash(parent_path),
+            "parent_completed_updates": resumed["completed_updates"],
+            "parent_run_id": resumed["wandb_run_id"],
+            "parent_git_commit": resumed["provenance"]["git_commit"],
+            "learning_rate_before": (
+                resumed["optimizer_state"]["param_groups"][0]["lr"]),
+            "learning_rate_after": config.learning_rate,
+            "worker_sampling": "Identical new worker streams across children; parent "
+                               "prefetch queues were not saved. "
+                               "Not an exact continuation.",
+            **transfer,
+        }
+        write_json(root / "parent_verified.json", provenance["fine_tuning"])
+        reference_audit = verify_reference(
+            asdict(config), provenance, config.reference_dir)
+        write_json(root / "reference_verified.json", reference_audit)
+        write_json(root / "provenance.json", provenance)
+        run = wandb.init(
+            entity=config.wandb_entity, project=config.project, group=config.group,
+            name=config.name, config={
+                **asdict(config), "provenance": provenance,
+                "pair_stats": pair_stats, "dataset": dataset.stats,
+            },
+            dir=str(root), mode=config.wandb_mode,
+            settings=wandb.Settings(disable_git=True, save_code=False),
+        )
+        write_json(root / "wandb_run.json", {"id": run.id, "url": run.url})
+        print("WANDB_RUN " + str(run.url), flush=True)
+        if config.wandb_mode != "disabled":
+            artifact = wandb.Artifact(
+                f"preference-only-pairs-{run.id}", type="preference-pairs")
+            artifact.add_file(str(root / "pairs.npz"))
+            artifact.add_file(str(root / "pair_stats.json"))
+            artifact.add_file(str(root / "provenance.json"))
+            artifact.add_file(str(root / "parent_verified.json"))
+            artifact.add_file(str(root / "reference_verified.json"))
+            run.log_artifact(artifact)
+        start_time = time.monotonic()
+
+        def checkpoint(completed):
+            saved = {
+                "model_state": model.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "scheduler_state": scheduler.state_dict(),
+                "completed_updates": completed, "config": asdict(config),
+                "state_mean": dataset.state_mean, "state_std": dataset.state_std,
+                "rng_state": rng_state(), "pair_rng_state": pair_rng.get_state(),
+                "loader_generator_state": loader_generator.get_state(),
+                "provenance": provenance, "wandb_run_id": run.id,
+                "resume_note": "Worker prefetch queues are not serialized. "
+                               "Exact batch continuation / auto-resume is not claimed.",
+            }
+            path = root / "checkpoints" / f"step{completed:06d}.pt"
+            torch.save(saved, str(path) + ".tmp")
+            os.replace(str(path) + ".tmp", path)
+
+        evaluations = []
+
+        def evaluate(step, metrics_file):
+            write_json(root / "status.json", {
+                "state": "evaluating", "completed_updates": step,
+                "pid": os.getpid(), "wandb_url": run.url,
+            })
+            saved_rng = rng_state()
+            model.eval()
+            env.seed(config.eval_seed)
+            episode_returns, lengths = [], []
+            for _ in range(config.eval_episodes):
+                score, length = eval_rollout(
+                    model, env, 12000.0 * config.reward_scale,
+                    config.device, config.reward_mode,
+                )
+                episode_returns.append(score / config.reward_scale)
+                lengths.append(length)
+            scores = env.get_normalized_score(np.array(episode_returns)) * 100
+            evaluation = {
+                "step": step, "total_updates": 100000 + step,
+                "return_mean": float(np.mean(episode_returns)),
+                "normalized_score_mean": float(np.mean(scores)),
+                "normalized_score_std": float(np.std(scores)),
+                "returns": episode_returns, "lengths": lengths,
+            }
+            if step == 0 and not config.validation_mode:
+                parent_eval = json.loads(
+                    (parent_root / "evaluations/step100000.json").read_text())
+                if not np.allclose(episode_returns, parent_eval["returns"],
+                                   rtol=0, atol=1e-6):
+                    raise ValueError("Initial evaluation differs from parent DT")
+            if step == 0:
+                reference_baseline = json.loads(
+                    (Path(config.reference_dir) / "evaluations/step000000.json")
+                    .read_text())
+                if evaluation != reference_baseline:
+                    raise ValueError("Baseline differs from matched C reference")
+            evaluations.append(evaluation)
+            write_json(root / "evaluations" / f"step{step:06d}.json", evaluation)
+            metrics = {
+                "eval/12000_normalized_score_mean": float(np.mean(scores)),
+                "eval/12000_normalized_score_std": float(np.std(scores)),
+                "eval/12000_return_mean": float(np.mean(episode_returns)),
+                "eval/12000_return_std": float(np.std(episode_returns)),
+            }
+            run.log(metrics, step=step, commit=False)
+            run.log({f"episodes/step_{step:06d}": wandb.Table(
+                columns=["episode", "return", "normalized_score", "length"],
+                data=[[i, float(r), float(s), float(n)] for i, (r, s, n)
+                      in enumerate(zip(episode_returns, scores, lengths))],
+            )}, step=step, commit=False)
+            metrics_file.write(json.dumps({"step": step, **metrics}) + "\n")
+            print(f"EVAL {step} " + json.dumps(metrics), flush=True)
+            restore_rng(saved_rng)
+            model.train()
+            run.log({}, step=step)
+
+        restore_rng(resumed["rng_state"])
+        checkpoint(completed_updates)
+        iterator = iter(loader)
+        with (root / "metrics.jsonl").open("a", buffering=1) as metrics_file:
+            evaluate(0, metrics_file)
+            for step in range(completed_updates + 1, config.update_steps + 1):
+                states, actions, returns, times, mask = [
+                    item.to(config.device) for item in next(iterator)
+                ]
+                before_forward_rng = rng_state()
+                # Preserve the ordinary batch/forward/dropout draw schedule, but
+                # forbid any new DT-loss gradient in this second-stage ablation.
+                with torch.no_grad():
+                    prediction = model(states, actions, returns, times, ~mask.bool())
+                    dt_loss = (F.mse_loss(prediction, actions, reduction="none")
+                               * mask.unsqueeze(-1)).mean()
+                indices = pair_rng.randint(len(pairs), size=config.preference_batch_size)
+                preference = dense_preference_batch(dataset, pairs, indices, 12000.0)
+                ps, pa, pr, pt, pm, target_index, negative = [
+                    torch.from_numpy(item).to(config.device) for item in preference
+                ]
+                output = model(ps, pa, pr, pt, ~pm.bool())
+                row = torch.arange(len(indices), device=config.device)
+                pref_loss, dpos, dneg, active = auxiliary_loss(
+                    "c", output[row, target_index],
+                    pa[row, target_index], negative,
+                    config.preference_margin,
+                )
+                # All arms execute the same two forwards and sampling schedule.
+                if step == 1:
+                    write_json(root / "first_update.json", {
+                        "ordinary_batch_sha256": fingerprint(
+                            [states, actions, returns, times, mask]),
+                        "pair_indices_sha256": fingerprint(indices),
+                        "before_forward_rng_sha256": fingerprint(before_forward_rng),
+                        "dt_loss": dt_loss.item(),
+                        "positive_mse": dpos.mean().item(),
+                        "negative_mse": dneg.mean().item(),
+                        "preference_loss": pref_loss.item(),
+                    })
+                    verify_initial(root, Path(config.reference_dir))
+                loss = preference_only_objective(
+                    dt_loss, pref_loss, config.preference_weight)
+                if not torch.isfinite(loss):
+                    raise FloatingPointError(f"Nonfinite loss at update {step}")
+                optimizer.zero_grad()
+                try:
+                    loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), config.clip_grad, error_if_nonfinite=True
+                    )
+                except RuntimeError:
+                    torch.save({
+                        "step": step, "model_state": model.state_dict(),
+                        "batch": [states, actions, returns, times, mask],
+                        "auxiliary": [ps, pa, pr, pt, pm, target_index, negative],
+                        "rng_state": before_forward_rng, "config": asdict(config),
+                    }, root / "failure_batch.pt")
+                    # Gradients have not been applied; retain the last valid state.
+                    checkpoint(completed_updates)
+                    raise
+                optimizer.step()
+                scheduler.step()
+                completed_updates = step
+                if step == 1 or step % config.log_every == 0:
+                    metrics = {
+                        "train/dt_loss": dt_loss.item(),
+                        "train/dt_loss_weight": 0.0,
+                        "train/preference_loss": pref_loss.item(),
+                        "train/weighted_preference_loss": (
+                            config.preference_weight * pref_loss.item()),
+                        "train/total_loss": loss.item(),
+                        "train/positive_mse": dpos.mean().item(),
+                        "train/negative_mse": dneg.mean().item(),
+                        "train/active_fraction": active.float().mean().item(),
+                        "diagnostic/c_gate_active_fraction": (
+                            dpos - dneg + config.preference_margin > 0
+                        ).float().mean().item(),
+                        "progress/total_updates": 100000 + step,
+                        "train/grad_norm": grad_norm.item(),
+                        "train/next_learning_rate": scheduler.get_last_lr()[0],
+                        "time/elapsed_seconds": time.monotonic() - start_time,
+                    }
+                    run.log(metrics, step=step, commit=False)
+                    metrics_file.write(json.dumps({"step": step, **metrics}) + "\n")
+                    write_json(root / "status.json", {
+                        "state": "training", "completed_updates": step,
+                        "pid": os.getpid(), "wandb_url": run.url, **metrics,
+                    })
+                    print(f"UPDATE {step} " + json.dumps(metrics), flush=True)
+                if step in config.eval_steps:
+                    evaluate(step, metrics_file)
+                if step % config.checkpoint_every == 0 or step == config.update_steps:
+                    checkpoint(step)
+                # Flush once per completed update. Separate committed log() calls
+                # at the same step would discard evaluation values and tables.
+                if (step == 1 or step % config.log_every == 0
+                        or step in config.eval_steps):
+                    if step not in config.eval_steps:
+                        run.log({}, step=step)
+        summary = {
+            "objective": "0.05 * C preference; DT loss diagnostic only",
+            "completed_updates": step,
+            "total_updates": 100000 + step,
+            "baseline_score": evaluations[0]["normalized_score_mean"],
+            "gain_from_parent": (evaluations[-1]["normalized_score_mean"]
+                                 - evaluations[0]["normalized_score_mean"]),
+            "last_score": evaluations[-1]["normalized_score_mean"],
+            "last_three_eval_mean": float(np.mean([
+                e["normalized_score_mean"] for e in evaluations[-3:]
+            ])),
+            "elapsed_seconds": time.monotonic() - start_time,
+        }
+        write_json(root / "summary.json", summary)
+        run.summary.update(summary)
+        run.finish()
+        write_json(root / "status.json", {"state": "completed", **summary})
+    except BaseException as error:
+        failure = {
+            "state": "failed", "last_loop_step": step,
+            "completed_updates": completed_updates,
+            "error_type": type(error).__name__,
+            "error": str(error),
+        }
+        write_json(root / "status.json", failure)
+        if run is not None:
+            run.summary["failure"] = failure
+            run.finish(exit_code=1)
+        raise
+    finally:
+        if env is not None:
+            env.close()
+
+
+if __name__ == "__main__":
+    train()
