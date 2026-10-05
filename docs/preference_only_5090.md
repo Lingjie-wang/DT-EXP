@@ -63,3 +63,52 @@ This one-seed ablation tests the effect of including DT loss, not whether
 overfitting caused the earlier decline. Preference-only fine-tuning can also
 overfit its limited pair pool or alter behavior outside covered states. Even an
 improvement needs independent evaluation/training seeds before a stable claim.
+
+## Completed results (2026-10-05)
+
+Execution source is `bd68d36c3b4f2a5e7c66054946369f827ea658ca`.
+All 34 relevant unit tests and clean-export Ruff 0.0.278 passed;
+[GitHub Actions passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37285298201).
+The full-batch three-update GPU smoke passed, including exact initial-state,
+data/dropout/loss and baseline-evaluation equivalence to the prior C smoke.
+The formal run passed the same audits and completed all 5,000 updates and
+four 100-episode evaluations. The queue completed normally.
+
+| Additional updates | C-only normalized score |
+|---|---:|
+| 0 | 38.5276858584 |
+| 1,000 | 36.7989564417 |
+| 3,000 | 36.9300328810 |
+| 5,000 (primary endpoint) | 35.4285710436 |
+
+| Final comparison | Difference in normalized score |
+|---|---:|
+| C-only minus frozen parent | -3.0991148147 |
+| C-only minus continued DT | -1.5276241447 |
+| C-only minus mixed DT+C | -0.6854902704 |
+
+The last ten logged training batches had mean diagnostic DT MSE 0.05668793
+(initial common batch 0.03799485), C preference loss 0.00608841 and active gate
+fraction 0.19140625. The mixed C control's last-ten means were DT MSE 0.03714904
+and preference loss 0.01057961. These are sampled training diagnostics, not a
+held-out validation set: improving the preference objective did not improve
+rollout return, while ordinary action prediction became less accurate.
+
+Paired episode bootstrap (20,000 resamples, seed 42) gives approximate 95%
+intervals for C-only minus parent [-5.19, -0.96], minus DT [-3.82, 0.82], and
+minus mixed C [-3.26, 1.94]. These intervals describe evaluation initial-state
+uncertainty for these fixed policies, not uncertainty across training seeds.
+This run provides no evidence that removing DT loss improves this fine-tuning
+setup; it neither establishes nor rules out overfitting as the earlier mechanism.
+
+Formal run: [3mn1pfgo](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/3mn1pfgo),
+`PreferenceOnly-c-only-seed0-halfcheetah-medium-replay-v2-fb4031b2`.
+The [saved comparison view](https://forge.coreweave.com/wandb/2820402607-shandong-university/CORL-DDR/workspace?nw=8gjbrpa85gn&panelDisplayName=eval%2F12000_normalized_score_mean&panelSectionName=eval)
+includes this run and the three completed late-preference controls, all visible.
+The x-axis counts additional updates after the common 100k DT parent.
+
+Frozen server source: `.runtime/preference-only-source-bd68d36`; campaign:
+`results/preference-only-5090-seed0-20261005` under `/home/sckd02/workspace/DT-EXP`.
+Queue PID 616814, tmux session `preference-only-queue-20261005` completed.
+Final records include `comparison.json`, `formal_verified.json`, and each
+checkpoint/evaluation/metric file. Original experiments remain unchanged.
