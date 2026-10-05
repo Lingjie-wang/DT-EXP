@@ -99,3 +99,32 @@ This is a single-training-seed pilot. Similar B/C performance provides no strong
 evidence for keeping the gate; an apparent C advantage requires additional seeds
 before claiming a stable effect. Do not infer action-label correctness or causal
 advantages from one run or from episode-level error bars.
+
+## Deployment verification (2026-10-05)
+
+Execution source is pinned to `74d77e31f5670e6ec4d028fcb1971a37b1d325d1`.
+All 45 relevant unit tests and clean-export Ruff 0.0.278 passed;
+[GitHub Actions also passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37260924078).
+
+Two server CPU smokes completed two policy updates and one real evaluation
+episode, with ordinary batch 8 / auxiliary batch 4 and no loader workers.
+Both new variants exactly matched the old RTG C's first DT, positive and
+negative losses and its counterfactual gate fraction. Every one of the 7,306
+ordered pairs, distances and RTG gaps, and the pair-file hash, matched RTG C.
+The zero-weight variant's final model tensors were all exactly equal to the
+old dense DT after two updates. B's loss equaled its positive MSE and its active
+fraction was 1. The strict reference compatibility checks passed before updates.
+
+[W&B CPU validation run](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/ox78861f)
+finished successfully. Independent API reads verified step-2 evaluation, its
+episode table and the artifact with pairs, statistics, provenance and the
+reference audit. This short run checks execution/upload, not policy performance.
+The server record is
+`results/matched-positive-cpu-smoke-b-20261005/deployment_verified.json`.
+
+Installed tmux queue `matched-positive-queue-20261005`, PID `611686`, was verified
+`waiting` for MC-value queue PID `602774`. Its manifest pins source/dependency
+revisions and the reused RTG C/DT directories. MC-value C was still training
+at 86,900 updates; B had not launched early. Only the MC-value process was using
+the GPU. The queued CUDA smoke and formal 100k-update B remain future work for
+the installed queue after successful predecessor completion.
