@@ -66,31 +66,41 @@ Run late-preference, matched-positive, dense-preference and state-only tests, th
 Ruff 0.0.278 against a clean tracked export before publication. Verify GitHub
 Actions and all three GPU smokes before interpreting any formal results.
 
-## Deployment verification (2026-10-05, Asia/Shanghai)
+## Completed campaign (2026-10-05, Asia/Shanghai)
 
-Execution source `d6db68df19848edc8af2e2f8105393f548cbb0e9` was published and
+Execution source `d6db68df19848edc8af2e2f8105393f548cbb0e9` was published before
 [GitHub Actions passed](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37278294625).
-Thirty late-preference/matched-positive/dense/state-only tests and the clean
-tracked export's Ruff 0.0.278 check passed. Three full-batch CUDA smokes each
-completed three updates and evaluations at 0/3 (one episode, offline W&B).
-Cross-child checks verified exact restored parent states, first ordinary batch,
-pair indices, dropout RNG, initial losses and baseline episode returns.
+Thirty relevant unit tests and clean-export Ruff 0.0.278 passed. Three full-batch
+CUDA smokes each completed three updates and evaluations at 0/3 (one episode).
+All three FORMAL children then completed 5,000 additional updates and all four
+100-episode evaluations. The queue reported completed at 16:16 Beijing time.
+
+Formal cross-child checks verified exact restored model/optimizer/scheduler
+states, first ordinary batch, pair indices, dropout RNG and initial losses.
+All 100 baseline episode returns exactly matched across children and reproduced
+the original parent's saved evaluation within the predeclared 1e-6 tolerance.
+
+| Arm | Before (0) | +1k | +3k | Final +5k | Final minus parent |
+|---|---:|---:|---:|---:|---:|
+| [DT](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/g9fe4dp1) | 38.5277 | 37.2969 | 37.7383 | 36.9562 | -1.5715 |
+| [B](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/c1amwyrf) | 38.5277 | 37.9205 | 37.9553 | 35.8897 | -2.6380 |
+| [C](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/zie5w3hn) | 38.5277 | 36.5530 | 37.5955 | 36.1141 | -2.4136 |
+
+"B-minus-DT" at the primary final endpoint is -1.0665 points;
+"C-minus-DT" is -0.8421; C-minus-B is 0.2244.
+Neither preference arm improved on continued DT or the parent. Intermediate
+B scores exceeded the matched DT at 1k/3k but not the predeclared final endpoint.
+This pilot does not support a benefit for this specific late-preference setup.
+One training seed cannot establish a universal failure of staged training; the
+comparison also does not isolate activation timing against from-scratch C at
+equal total update budget and identical LR schedule.
 
 Server source: `.runtime/late-preference-source-d6db68d` beneath the runtime base.
 Campaign: `results/late-preference-5090-seed0-20261005`; tmux session
 `late-preference-queue-20261005`, queue PID 615275; log
-`logs/late-preference-queue-20261005.log`. The queue first completed all smokes,
-then launched formal DT. B and C follow after successful predecessors.
-
-[Formal DT child g9fe4dp1](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/g9fe4dp1)
-reproduced the parent's 100 baseline episode returns (mean normalized score
-38.527685858354396) before updates. Independent direct W&B API readback confirmed
-baseline and step-1000 evaluations match local files and the LR is 1e-4. The SDK
-public API service timed out during the initial read-only check; direct W&B
-GraphQL readback succeeded, and the training upload remained live.
+`logs/late-preference-queue-20261005.log`. Final records are `comparison.json`,
+`children_verified.json`, each child's summary, metrics, checkpoint and evaluations.
 
 [Saved W&B comparison view](https://forge.coreweave.com/wandb/2820402607-shandong-university/CORL-DDR?nw=8gjbrpa85gn&panelDisplayName=eval%2F12000_normalized_score_mean&panelSectionName=eval)
-uses the name filter `^LatePreference-(dt|b|c)-seed0` and additional-update x-axis.
-At deployment verification DT was evaluating additional step 3000. Formal
-completion and B/C results are not established by this deployment record; inspect
-`queue_status.json`, `children_verified.json` and `comparison.json` for results.
+filters `^LatePreference-(dt|b|c)-seed0`, with all three formal runs visible.
+The x-axis counts ADDITIONAL updates after the common 100k parent.
