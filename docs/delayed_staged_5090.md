@@ -92,3 +92,39 @@ late/matched tests, then Ruff 0.0.278 on a clean tracked export before publicati
 Inspect CI and GPU smoke results. This one-seed ablation does not prove
 overfitting as a mechanism or isolate activation timing against from-scratch C
 at equal total budget. The historical recovered delayed C is contextual only.
+
+## Deployment record (2026-10-05, Asia/Shanghai)
+
+- Frozen training source: `f34c3bf3751fc7a3ce693663dfa471fad6640153`.
+  All 34 relevant unit tests and clean-export Ruff passed. GitHub Actions
+  [37290091160](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37290091160)
+  also passed.
+- All five full-batch GPU smoke runs passed, including matching child initial
+  model/optimizer/RNG, batch/pair/dropout fingerprints, initial losses and
+  baseline episode returns. `smoke_verified.json` records all checks as true.
+- The formal ordinary delayed DT started at about 17:31. Its W&B run is
+  [a2sn7vr3](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/a2sn7vr3).
+  A launch check observed 1,900 completed updates with finite loss. This is
+  progress only: the parent and four formal children are not yet completed.
+- Actual training data audit: 202 trajectories / 202,000 transitions; every
+  nonterminal reward is zero and every valid trajectory RTG is constant.
+  Transformed reward/RTG SHA256:
+  `13bafcb5b8869f97a87332fb73e9c3600cc80dcdac094ea845fceb6732fb6c3f`.
+  The runtime also verified ordinary and auxiliary batch RTGs. The pair pool
+  has 6,768 pairs; W&B config confirms `reward_mode=delayed`,
+  `variant=parent_dt`, `preference_weight=0`.
+- Host campaign directory:
+  `/home/sckd02/workspace/DT-EXP/results/delayed-staged-5090-seed0-20261005`.
+  Frozen source directory: `.runtime/delayed-staged-source-f34c3bf` under the
+  same project. tmux session: `delayed-staged-queue-20261005`.
+  Queue log: `logs/delayed-staged-queue-20261005.log`.
+  The queue automatically runs the four 5k children after the parent completes.
+- Saved W&B views:
+  [ordinary delayed DT, 100k](https://forge.coreweave.com/wandb/2820402607-shandong-university/CORL-DDR/workspace?nw=2j7s3f0k3qc)
+  and [delayed preference continuations, 5k](https://forge.coreweave.com/wandb/2820402607-shandong-university/CORL-DDR/workspace?nw=2ijs0nhgx97).
+  The second view is preconfigured and remains empty until the children start.
+- Historical original-reward runs `g9fe4dp1`, `c1amwyrf`, `zie5w3hn`,
+  `3mn1pfgo` retain their metrics and names, with appended scope-correction
+  notes and tags `reward-original`, `outside-delayed-scope`.
+  Their [saved view](https://forge.coreweave.com/wandb/2820402607-shandong-university/CORL-DDR/workspace?nw=8gjbrpa85gn)
+  is now explicitly titled `5090 · 原始逐步奖励（非延迟）· 后加偏好 5k`.
