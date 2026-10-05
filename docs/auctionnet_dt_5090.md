@@ -114,6 +114,47 @@ paths. This synthetic check is not a benchmark result.
 The public P7 and P8 data have been processed by the unchanged official generator:
 48 trajectories each, respectively 1,910 and 1,949 retained transitions. The
 combined 96 trajectories / 3,859 transitions are for the separate smoke only.
-The full pipeline waits for all required periods; it cannot silently substitute
-the smoke training set for P7-P13. Download and pipeline tmux sessions are
+The full pipeline requires all periods and cannot silently substitute the smoke
+training set for P7-P13. Download and pipeline tmux sessions are
 `auctionnet-dt-download-parallel-20261005` and `auctionnet-dt-pipeline-20261005`.
+
+The real-data smoke completed on 2026-10-05 at about 22:06 Asia/Shanghai:
+10 updates plus one held-out P14 advertiser evaluation, with the official Python
+source unchanged. Its score of 0.0 is an execution check after only 10 updates,
+not a useful performance measurement. The checkpoint and metrics were synced to
+[W&B run 0xdy3ncr](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/0xdy3ncr).
+Status, protocol, logs, metrics and checkpoint were also copied to the primary
+workspace's ignored `.runtime/auctionnet-dt-records-20261005/smoke/` directory.
+
+Full P7-P13 preparation produced 336 trajectories / 13,972 retained transitions.
+Each period has 48 trajectories; transition counts for P7 through P13 are
+1,910, 1,949, 2,050, 2,005, 2,066, 1,994 and 1,998. All seven periods' observations,
+actions, rewards and done flags matched the actual official AuctionNet
+`EpisodeReplayBuffer` output at `rtol=atol=1e-12`. The reference loader was
+`strategy_train_env/bidding_train_env/baseline/dt/utils.py` at the pinned AuctionNet
+commit, SHA256 `0c37581500b22c42ec78267ee4dc00be0cd57aa24278e5f3cd83fd4ed9a4dc9d`.
+This validates the format conversion, not equivalence to PRGS's unpublished data.
+
+Full prepared-data SHA256s:
+
+- `training_data_small.pkl`: `83281032a1c48807069fd365a74070822a16dc272a5dec07618f9014c0c172fd`
+- `normalize_dict.pkl`: `0cd59199cb9640a0eb61907e67badfb87014a713dd6aa8dfdc9ce0f38b35e8a7`
+
+All required public raw data finished downloading and extracting on 2026-10-05.
+The full 100k-update job started at about 22:17 Asia/Shanghai. By 22:20, it had
+completed its first 10,000 updates with finite logged loss and entered evaluation;
+P14 and P15 had returned scores. Training ran at about 94 updates/second. The job is
+running in tmux and can continue after the interactive SSH connection closes.
+Follow [W&B run 5sm7osbe](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/5sm7osbe).
+Training throughput excludes the full official bidding evaluations; no completed
+100k result is available at this launch check.
+
+Prepared training pickles, normalization, per-period audits and reference-loader
+comparison records are backed up under the primary workspace's ignored
+`.runtime/auctionnet-dt-records-20261005/data/`. An initial snapshot of the full
+run's frozen source, protocol and logs is under `full/` in that same backup root.
+The running observer uploads metrics and each official checkpoint to W&B.
+
+Implementation commit `804bdbd90694caf8babd7758c74781011cbb6f5f` was published to
+GitHub; [Actions run 37321428963](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37321428963)
+passed. The data, environment, W&B credentials and generated results are not in Git.
