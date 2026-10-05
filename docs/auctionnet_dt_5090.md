@@ -158,3 +158,66 @@ The running observer uploads metrics and each official checkpoint to W&B.
 Implementation commit `804bdbd90694caf8babd7758c74781011cbb6f5f` was published to
 GitHub; [Actions run 37321428963](https://github.com/Lingjie-wang/DT-EXP/actions/runs/37321428963)
 passed. The data, environment, W&B credentials and generated results are not in Git.
+
+## Sequential non-final/general DT run (2026-10-06)
+
+The user requested ordinary DT on the newly identified non-final/general dataset
+after the existing final/general experiment finishes. The independent entry point
+is `scripts/auctionnet_dt_nonfinal/launch.sh`. It downloads ahead of time, but
+does not preprocess or start training until the predecessor reports `completed`,
+100,000 updates and unchanged upstream Python. Reaching 100,000 updates while
+still evaluating is insufficient. A failed predecessor blocks the queue.
+
+The source is the Alibaba competition's original
+[general-track download list](https://github.com/alimama-tech/NeurIPS_Auto_Bidding_General_Track_Baseline#dataset-link):
+`https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/`
+`autoBidding_general_track_data_period_<range>.zip`.
+Unlike the first run, these URLs contain neither `/final/` nor `_final_`.
+The eight groups cover P7-P20 (P21 is excluded) and total 12,696,781,121 compressed
+bytes. `dataset_manifest.json` records the measured sizes and ETags; the downloader
+checks them, supports byte-range resume, retries transport failures up to five
+times, and verifies extracted file CRCs and SHA256s. ETags are identity checks,
+not claimed to be cryptographic whole-file checksums.
+
+Range samples from P7 (120,067 rows) and P14 (115,409 rows) each included all
+48 advertisers and CPA values 6-12. In contrast, the existing final/general data
+has CPA 60-130 and mean retained training return 26.7. This supports a different
+conversion regime; it does not establish equivalence to PRGS's unpublished data
+or guarantee its reported DT mean score of 267.3. The similarly named AIGB files
+are not interchangeable: the sampled non-final/general and AIGB P7 rows differed
+in `pValueSigma` and `conversionAction`. Use general-track raw data only, with no
+extended or generated trajectory additions.
+
+The only experimental change is the dataset version. Retain ordinary DT,
+`is_stitch: false`, P7-P13 training, P14-P20 evaluation, original step rewards,
+100,000 updates, all five targets, and the final target-1.0 primary result. The
+official 48-step-generator versus 96-step-evaluator discrepancy and target-return
+settings remain unchanged in this comparison. Their effects require separately
+named controls. No existing source/configuration/checkpoint/result is modified.
+
+- Cache and queue state: `.runtime/auctionnet-dt-nonfinal-data-20261006/`.
+- New run: `results/prgs-dt-auctionnet-nonfinal-5090-20261006/`.
+- Predecessor: `results/prgs-dt-auctionnet-5090-20261005/`.
+- tmux session: `auctionnet-dt-nonfinal-queue-20261006`.
+- Logs: `pipeline.log`, `download.log` and `queue_status.json` in the new cache.
+- W&B: existing `CORL-DDR` project and `AuctionNet-DT-PRGS-5090-20261005` comparison
+  group; the new run has a distinct `nonfinal` name and dataset-version metadata.
+
+The new pipeline reuses the validated preprocessing, run preparation and observer
+scripts from `scripts/auctionnet_dt` without modifying them. After preparation it
+corrects provenance text in the new run's `protocol.json` to identify non-final
+data; it does not change upstream code or effective configuration. Normalization
+is recomputed from the new training data only. W&B uploads metrics/checkpoints.
+
+```bash
+mkdir -p .runtime/auctionnet-dt-nonfinal-data-20261006
+tmux new-session -d -s auctionnet-dt-nonfinal-queue-20261006 \
+  'bash scripts/auctionnet_dt_nonfinal/launch.sh > .runtime/auctionnet-dt-nonfinal-data-20261006/pipeline.log 2>&1'
+```
+
+Run this from the server project directory. The launch script uses the existing
+dedicated environment and ignored W&B credentials. An advisory lock prevents
+duplicate queues. Prior run directories are never reused; failures stop visibly
+in `queue_status.json` and need inspection before a new attempt. Six queue-gate
+tests cover pending/running/failed/incomplete/verified completion, in addition
+to the five existing data-conversion tests.
