@@ -221,3 +221,69 @@ duplicate queues. Prior run directories are never reused; failures stop visibly
 in `queue_status.json` and need inspection before a new attempt. Six queue-gate
 tests cover pending/running/failed/incomplete/verified completion, in addition
 to the five existing data-conversion tests.
+
+## Sequential delayed-reward DT on non-final/general (2026-10-06)
+
+The user additionally requested ordinary DT with delayed rewards on the same new
+dataset. Execution order is final/general step-reward DT, non-final/general
+step-reward DT, then non-final/general delayed-reward DT. The independent launcher
+is `scripts/auctionnet_dt_delayed/launch.sh`. It waits for successful completion
+of the second experiment, including final evaluation, 100,000 updates and source
+verification. Missing/running predecessors wait; failed predecessors stop the
+queue. No GPU process starts while waiting.
+
+Training uses the official `SequenceDataset` implementation with
+`delayed_reward: true`: for each trajectory, set all earlier rewards to zero and
+place that trajectory's original reward sum at its final transition. Returns,
+observations, actions, terminal flags, normalization and trajectory selection
+stay unchanged. Prepared data are hash-verified against the ordinary run's audit
+and copied to an independent snapshot; reward conversion occurs in memory and
+does not rewrite either pickle. The ordinary predecessor must identify itself as
+non-final/general, `model_type: dt`, `is_stitch: false`, and non-delayed.
+
+This is an explicitly modified task variant, not an unchanged official baseline.
+The official evaluator does not consult `delayed_reward` and normally supplies
+each intermediate conversion reward to `model.take_actions`. In the independent
+runtime copy only, one line in `evaluation_bidding.py` changes from
+`pre_reward=pre_reward` to `pre_reward=0.0`. This keeps evaluation RTG constant
+within each episode, consistent with terminal-only reward feedback. No action
+is requested after the terminal reward. This is a requested reward-protocol
+change, not a compatibility fix; there was no upstream runtime error motivating
+it. The patch is saved as `delayed_reward.patch`, and the protocol records both
+the original and modified hashes. No monkey patch is used in the experiment.
+The observer is independently copied to report `upstream_python_unchanged: false`
+and verify `runtime_source_unchanged: true` on successful completion.
+
+Auction dynamics, CPA-penalized total-conversion scoring and state features,
+including historical conversion statistics, remain unchanged. Thus this is a
+change to explicit reward timing, not a delayed-observation environment. Equal
+actions retain equal scores; a differently trained policy can have different
+scores. The same P7-P13/P14-P20 split, 100,000 updates, five targets, architecture,
+optimizer, unseeded official training flow and 48/96-step discrepancy are retained.
+Primary comparison remains the final target-1.0 score. Matching the paper's
+unpublished prepared data remains unverified.
+
+- Queue: `.runtime/auctionnet-dt-nonfinal-delayed-queue-20261006/`.
+- Independent data snapshot: `prepared-data/` inside the queue directory.
+- Results: `results/prgs-dt-auctionnet-nonfinal-delayed-5090-20261006/`.
+- tmux: `auctionnet-dt-nonfinal-delayed-queue-20261006`.
+- W&B: existing `CORL-DDR` project/comparison group, a distinct delayed run name,
+  and explicit `reward_protocol`/`dataset_version` metadata. The run is created
+  when training starts, not while the queue is waiting.
+
+```bash
+mkdir -p .runtime/auctionnet-dt-nonfinal-delayed-queue-20261006
+tmux new-session -d -s auctionnet-dt-nonfinal-delayed-queue-20261006 \
+  'bash scripts/auctionnet_dt_delayed/launch.sh > .runtime/auctionnet-dt-nonfinal-delayed-queue-20261006/pipeline.log 2>&1'
+PRGS_AUCTIONNET_SOURCE="$PWD/.runtime/auctionnet-upstream-20261005/prgs/AuctionNet" \
+  .runtime/auctionnet-dt-5090-env/bin/python -m unittest discover \
+  -s tests -p 'test_auctionnet*.py'
+```
+
+The additional tests exercise queue failure/wait/release, data provenance and
+snapshot independence, actual official loader reward/RTG behavior, and the actual
+original/modified evaluator with deterministic test doubles. They check unchanged
+states and scoring for identical actions and changed intermediate reward
+feedback. Source-dependent tests require `PRGS_AUCTIONNET_SOURCE`; release
+validation must set it and run those tests without skips. Existing implementations
+and results must continue to be preserved in subsequent work.
