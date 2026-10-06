@@ -287,3 +287,76 @@ states and scoring for identical actions and changed intermediate reward
 feedback. Source-dependent tests require `PRGS_AUCTIONNET_SOURCE`; release
 validation must set it and run those tests without skips. Existing implementations
 and results must continue to be preserved in subsequent work.
+
+## Fidelity audit and three independent ordinary-DT runs (2026-10-06)
+
+The user clarified that the objective is reproducing the paper's results. The
+single non-final/general run is an unchanged-official-code execution on
+reconstructed public data, **not a completed reproduction of Table 3**. Its final
+100k/target-1.0 score is 269.179216; closeness to 267.3 does not prove matching data
+or evaluation protocol. In particular, its P20 score is 205.504014 versus the
+paper's 241.0 ± 9.9, so average-score agreement must not hide period differences.
+
+Verified alignment: all official ordinary-DT Python hashes, all effective model
+and training hyperparameters, 100k updates, non-delayed rewards, no stitching,
+P7-P13 training and P14-P20 evaluation. Only three data-path fields differ in the
+ordinary run's YAML. The delayed experiment is a separately requested extension,
+with its documented reward/evaluator changes; it is not a Table 3 baseline.
+
+Unresolved paper/code differences and provenance limits:
+
+- Appendix B.2 (p18) says all results average three independent runs with standard
+  deviations. The official AuctionNet CLI has no seed argument or RNG seeding.
+  Neither the paper nor this code specifies the three actual seed values.
+- Table 5 (p17) says 32 eval episodes. `config/default.yaml` also says 32, but
+  `config/env/AuctionNet.yaml` overrides it to 1. Existing experiments preserve
+  the effective official AuctionNet value 1. Within-run std=0 from one evaluation
+  is not the across-run standard deviation printed in Table 3.
+- The paper does not specify which of the five target returns or which checkpoint
+  supplies Table 3. Final 100k/target1.0 is our explicit reporting convention, not
+  a verified author convention. Retain every target; do not select per-period
+  maxima or tune to the published test results.
+- Author trajectory/normalization pickles are not published. Our official
+  AuctionNet preprocessing plus format adapter yields 336 trajectories and
+  13,972 transitions from non-final/general P7-P13. Exact author-data equivalence
+  remains unverified, including trajectory splitting/filtering and normalization.
+- The paper uses RTX 3090; the requested 5090 uses Python3.10/Torch2.7.1+cu128.
+  This avoids source compatibility patches but is not an identical environment.
+- Preserve the previously recorded 48-step preprocessing / 96-step evaluator
+  discrepancy. Do not silently change it, eval repeats or seed injection in an
+  alleged unchanged official baseline.
+
+Sources: [paper](https://proceedings.iclr.cc/paper_files/paper/2026/file/439bf902de1807088d8b731ca20b0777-Paper-Conference.pdf),
+[official AuctionNet configuration](https://github.com/deligentfool/PRGS/blob/33bad7bc3e3f7cbfbefb68294b8e61069a6e58d4/AuctionNet/config/env/AuctionNet.yaml),
+[official entrypoint](https://github.com/deligentfool/PRGS/blob/33bad7bc3e3f7cbfbefb68294b8e61069a6e58d4/AuctionNet/main.py).
+
+To address the missing repetitions without altering official behavior,
+`scripts/auctionnet_dt_reproduction/launch.sh` launches two additional fresh
+processes sequentially, using unchanged official source/config and exactly the
+same prepared-data hashes as the completed baseline. They are independent
+unseeded runs, **not three explicitly seeded/replayable runs**. The first run
+remains untouched and is included regardless of its score; there is no run
+selection. This completes the count of independent runs but does not settle the
+other reproduction limitations above. The already completed delayed experiment
+is preserved and not included in ordinary-DT statistics.
+
+- Queue: `.runtime/auctionnet-dt-three-run-20261006/`.
+- Outputs: `results/prgs-dt-auctionnet-nonfinal-repeat2-5090-20261006/` and
+  `results/prgs-dt-auctionnet-nonfinal-repeat3-5090-20261006/`.
+- W&B: two separate runs in the existing comparison project/group.
+- Aggregation: `summary.json` in the queue, generated only after all three runs
+  pass 100k/final-evaluation/source/config/data checks. It reports P14-P20 mean
+  and sample std (ddof=1), plus population std because the paper's convention
+  is unspecified, for all five targets. Primary remains final 100k/target1.0.
+- Training never restarts into an existing result directory. Failures stop visibly.
+
+```bash
+mkdir -p .runtime/auctionnet-dt-three-run-20261006
+tmux new-session -d -s auctionnet-dt-three-run-20261006 \
+  'bash scripts/auctionnet_dt_reproduction/launch.sh > .runtime/auctionnet-dt-three-run-20261006/pipeline.log 2>&1'
+```
+
+Six additional tests cover final-checkpoint selection, all-target retention,
+between-run statistics, incomplete evaluation, data/config/source mismatches,
+and rejection of delayed variants as ordinary baselines. Source-dependent tests
+from the earlier suites must also run without skips before publication.
