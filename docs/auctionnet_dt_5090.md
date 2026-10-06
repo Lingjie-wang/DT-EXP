@@ -360,3 +360,50 @@ Six additional tests cover final-checkpoint selection, all-target retention,
 between-run statistics, incomplete evaluation, data/config/source mismatches,
 and rejection of delayed variants as ordinary baselines. Source-dependent tests
 from the earlier suites must also run without skips before publication.
+
+## Two more delayed-reward repetitions after ordinary repeats (2026-10-06)
+
+At the user's request, `scripts/auctionnet_dt_delayed_reproduction/launch.sh`
+queues delayed repetitions 2 and 3 **after both ordinary repetitions 2 and 3**.
+It waits for the ordinary campaign's `completed` state and three individually
+verified 100k completions, including final evaluation; reaching 100k while still
+evaluating does not release it. Failed/inconsistent completion blocks the queue.
+The completed first delayed run is preserved and included in its three-run
+statistics. These are new training processes, not checkpoint continuations.
+
+The additional runs use the same original delayed baseline's prepared-data
+snapshot, normalization, train/test split, configuration and explicit one-line
+evaluator change. Preparation verifies byte-for-byte equality of runtime source
+hashes, effective config, data audit and reward protocol against the first delayed
+run before starting training. The existing delayed prepare/observer scripts are
+reused without modification. The source snapshot's pickles are never rewritten;
+the official loader delays rewards in memory separately in each fresh process.
+
+As clarified with the user, these repeats follow the prior independent random
+initialization approach. No explicit seed values are injected or attributed to
+the authors; these are not paired-seed comparisons with ordinary DT. There is no
+change to reward semantics: per-trajectory terminal reward sum, zero intermediate
+explicit reward feedback, unchanged state features and final CPA scoring.
+
+- Queue: `.runtime/auctionnet-dt-delayed-three-run-20261006/`.
+- Predecessor: `.runtime/auctionnet-dt-three-run-20261006/`.
+- Results: `results/prgs-dt-auctionnet-nonfinal-delayed-repeat2-5090-20261006/`
+  and `results/prgs-dt-auctionnet-nonfinal-delayed-repeat3-5090-20261006/`.
+- tmux: `auctionnet-dt-delayed-three-run-20261006`.
+- Separate W&B runs in the existing project/group, created only when each starts.
+- `summary.json`: final 100k P14-P20 means and standard deviations over all three
+  delayed runs, retaining all five targets. Primary is target1.0; sample and
+  population standard deviations are both retained. Ordinary and delayed runs
+  are never pooled. The delayed summary is explicitly an extension, not the
+  paper's ordinary-DT Table 3 reproduction.
+
+```bash
+mkdir -p .runtime/auctionnet-dt-delayed-three-run-20261006
+tmux new-session -d -s auctionnet-dt-delayed-three-run-20261006 \
+  'bash scripts/auctionnet_dt_delayed_reproduction/launch.sh > .runtime/auctionnet-dt-delayed-three-run-20261006/pipeline.log 2>&1'
+```
+
+Five new tests cover the two-predecessor gate, failure/incomplete verification,
+delayed source/status provenance, statistics and exclusion of mixed reward
+protocols. Prior source-dependent tests also run without skips. Historical
+scripts, ordinary queues, configurations and outputs remain untouched.
