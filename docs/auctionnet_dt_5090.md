@@ -407,3 +407,38 @@ Five new tests cover the two-predecessor gate, failure/incomplete verification,
 delayed source/status provenance, statistics and exclusion of mixed reward
 protocols. Prior source-dependent tests also run without skips. Historical
 scripts, ordinary queues, configurations and outputs remain untouched.
+
+## Delayed repetition 3 logging-init recovery (2026-10-06)
+
+At the 21:15 status check, delayed repetition 2 had completed 100k updates with
+final target1.0 score 258.773235 (first delayed run: 259.040751). Repetition 3 had
+failed before training: `wandb.init` timed out on `api.wandb.ai/graphql`; status
+reported zero updates, and no training console/checkpoint had been created.
+The original failed directory and campaign log/status remain untouched.
+
+`launch_recovery.sh` runs the independent `recover_repeat3` entry point. It verifies
+the two completed delayed runs and completed ordinary campaign, then retries in
+`results/prgs-dt-auctionnet-nonfinal-delayed-repeat3-retry1-5090-20261006`.
+Only if online logging again fails at initialization with zero training and no
+console/checkpoint does it create a separate `...-repeat3-offline1-5090-20261006`
+attempt with the existing observer's offline W&B mode. Any training failure stops
+for inspection; there is no score-based retry. All failed attempts are preserved.
+
+Neither upstream training nor evaluation nor the observer is modified. Config,
+source hashes, data audit and reward protocol must match the first delayed run
+exactly. The only recovery difference is logging transport. An offline success
+attempts `wandb sync` after completion; failed synchronization remains explicitly
+pending in `wandb_sync.json` and does not discard the locally saved metrics/models.
+The two earlier successful delayed runs plus this completed third run are
+aggregated in the recovery queue's `summary.json`, excluding zero-training failures.
+
+Recovery queue: `.runtime/auctionnet-dt-delayed-repeat3-recovery-20261006/`.
+The historical delayed campaign remains `failed`; consult this recovery queue
+for current status. Two regression tests reject retries of training failures,
+partial training or failures with existing training artifacts.
+
+```bash
+mkdir -p .runtime/auctionnet-dt-delayed-repeat3-recovery-20261006
+tmux new-session -d -s auctionnet-dt-delayed-repeat3-recovery-20261006 \
+  'bash scripts/auctionnet_dt_delayed_reproduction/launch_recovery.sh > .runtime/auctionnet-dt-delayed-repeat3-recovery-20261006/pipeline.log 2>&1'
+```
