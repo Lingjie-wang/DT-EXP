@@ -1,5 +1,15 @@
 # Project version control
 
+## Experiment budgets and scheduling
+
+The user delegates planning for requested experiments: inspect existing learning
+curves and both servers' seed reservations before choosing a common, documented
+training budget. Pair comparison arms on the same new seeds. Account for GPU
+utilization, memory and observed throughput; run concurrently when useful and
+otherwise install a durable queue that counts already-running jobs. Record the
+chosen seeds, budget, scheduling limits and rationale before new training starts.
+Do not silently shorten historical runs or expand the requested methods/datasets.
+
 ## Preserve historical experiments
 
 The user requires new experimental work to preserve existing code and results.
