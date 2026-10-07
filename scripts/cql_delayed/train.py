@@ -8,6 +8,8 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+# D4RL's top-level import can skip this after optional Adroit/mjrl fails.
+import d4rl.gym_mujoco  # noqa: F401 -- register the official target environments
 import gym
 import numpy as np
 import torch
