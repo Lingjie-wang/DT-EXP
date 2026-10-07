@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+import yaml
+
 from scripts.cql_5090.run import require_preflight
 from scripts.cql_delayed.common import digest, read, verify, write
 
@@ -38,7 +40,12 @@ def validate_job(root, job):
         raise ValueError("Queue protocol changed")
     p = verify(campaign)
     spec = p["runs"][job["arm"]]
-    if spec["seed"] != job["seed"] or spec["updates"] != 300000:
+    expected_updates = read(root / "plan.json")["updates"]
+    config = yaml.safe_load((campaign / "source" / spec["config"]).read_text())
+    if (expected_updates <= 0 or spec["seed"] != job["seed"]
+            or spec["updates"] != expected_updates
+            or config["seed"] != job["seed"]
+            or config["max_timesteps"] != expected_updates):
         raise ValueError("Queue seed/budget differs")
     for name, expected in spec["data_sha256"].items():
         if digest(campaign / job["arm"] / name) != expected:

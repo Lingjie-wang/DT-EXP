@@ -1,5 +1,9 @@
 # Original-reward CQL reference, HalfCheetah, RTX 5090
 
+Active budget update: the user replaced this entirely pending 300k queue with
+the independent [100k queue](cql_queued_100k.md). The 300k preparation below is
+retained as historical provenance; its manager was stopped before any run began.
+
 Requested on 2026-10-07: queue original-reward CQL on HalfCheetah-medium-v2 and
 HalfCheetah-medium-replay-v2, three seeds per dataset. Six independent runs use
 policy/evaluation seeds **1, 11, 12** and **300,000 updates** each. Seeds are

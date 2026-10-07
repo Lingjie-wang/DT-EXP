@@ -1,5 +1,9 @@
 # Paired CQL policy repeats on RTX 5090
 
+Active budget update: the user replaced this entirely pending 300k queue with
+the independent [100k queue](cql_queued_100k.md). The 300k preparation below is
+retained as historical provenance; its manager was stopped before any run began.
+
 User-requested on 2026-10-07: add two seeds to each of the four active arms,
 choose a shorter common budget based on recent curves, and schedule within
 available resources. Historical campaigns, code, rewards, and results remain
