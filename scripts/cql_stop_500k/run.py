@@ -235,6 +235,14 @@ def watch(plan_path, index):
             verify(root)
             receipt_path = spool / "stop_receipt.json"
             if not receipt_path.exists():
+                # Warm deserialization imports and fail early on missing runtime
+                # dependencies, rather than discovering them at the stop boundary.
+                progress = read(work / "status.json")["completed_updates"]
+                earlier = [path for path in sorted(work.glob("checkpoint_*.pt"))
+                           if int(path.stem.split("_")[-1]) < min(progress, target)]
+                if earlier:
+                    status("validating_existing_checkpoint", checkpoint=str(earlier[-1]))
+                    checkpoint(earlier[-1], int(earlier[-1].stem.split("_")[-1]))
                 while True:
                     local = read(work / "status.json")
                     status("armed", training=local, target_updates=target)

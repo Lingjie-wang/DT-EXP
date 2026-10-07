@@ -69,6 +69,12 @@ and `run0` through `run3/status.json` record the plan and guard health. Each run
 its own log, lock, stop intent, receipt and W&B verification. No credentials or
 generated run files belong in Git.
 
+Real checkpoint loading requires `algorithms.offline.cql.Scalar` and its imported
+MuJoCo dependencies. The launcher supplies the existing training runtime's MuJoCo
+and library paths; no packages or scientific source are changed. Each watcher
+first loads an earlier completed checkpoint on CPU, so missing dependencies fail
+before it arms rather than at 500k. This also warms imports before the stop boundary.
+
 After interruption, inspect per-run status and restart the launcher with the
 **existing** plan. It never discovers fresh PIDs on recovery. Locks prevent two
 writers, receipts permit continuation after termination, and missing training

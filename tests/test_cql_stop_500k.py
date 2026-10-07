@@ -177,6 +177,7 @@ class StopTests(unittest.TestCase):
         write(self.root / "protocol.json", dict(source_sha256={}))
         write(self.work / "status.json",
               dict(status="training", completed_updates=500000))
+        torch.save(self.saved(100000), self.work / "checkpoint_0100000.pt")
         self.eval()
         path = self.work / "checkpoint_0500000.pt"
         path.write_bytes(b"incomplete-save")
