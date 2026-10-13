@@ -37,6 +37,11 @@ GitHub. After each coherent change and the appropriate validation, create a Git
 commit and push it to the project's existing GitHub remote without asking for
 confirmation again. This requirement also applies to follow-up fixes.
 
+The user explicitly prefers direct publication to `main` (2026-10-13).
+After validation, integrate the latest remote history and push to `main` normally.
+Do not create or leave completed work only in a pull request unless the user
+explicitly requests that workflow. Preserve existing commits and do not force-push.
+
 - Keep each commit scoped to the current task. Preserve unrelated working-tree
   changes and do not include them unless the user requests it.
 - Include relevant tests, configuration, scripts, and experiment documentation
