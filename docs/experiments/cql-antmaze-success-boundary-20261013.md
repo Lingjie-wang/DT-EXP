@@ -100,3 +100,42 @@ Inspect `pipeline_status.json`, `predictor/*/fit/status.json`, `queue/status.jso
 per-job `training/{console.log,evaluations.json,completion.json,wandb_manifest.json}`,
 and `comparison/{manifest.json,latest.json,status.json}`. Frozen data, checkpoints,
 runtime environments and generated artifacts remain outside Git.
+
+## Frozen campaign and initial validation
+
+Campaign: `results/cql-antmaze-success-rewards-seed21-1m-5090-20261013`.
+Frozen implementation commit: `3440f6183404e930702d6f91a10d3bc8d6c58a2c`.
+All 26 selected tests passed on a clean export using the server runtime; the
+[main-branch CI](https://github.com/Lingjie-wang/DT-EXP/actions/runs/38366434782) passed.
+All four real-loader audits and all four 100-step online CPU preflights passed.
+
+[W&B comparison charts and tables](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/5f95025b-5d4c-403f-8469-0407555458d9)
+were read back from the service: both official 20-point curves, the common
+40-row initial evaluation table, and the six-arm best-score table matched the
+frozen local records exactly. New arms are appended after completed evaluations.
+
+| Data audit | Umaze | Umaze Diverse |
+| --- | ---: | ---: |
+| Official retained transitions | 998,573 | 999,000 |
+| Nonempty success/timeout fragments | 10,131 | 1,035 |
+| Return-one fragments | 8,727 | 36 |
+| Zero-return fragments | 1,404 | 999 |
+| One-step fragments | 6,616 | 24 |
+| Empty fragments skipped after official filtering | 23 | 1 |
+| Uniform changed reward positions | 213,681 | 5,441 |
+
+These counts include official retained tail transitions; they are not counts
+of independent environment rollouts. Some timeout rows alone form empty raw
+fragments and are dropped by the official loader.
+
+| Held-out predictor diagnostic | Umaze | Umaze Diverse |
+| --- | ---: | ---: |
+| Predictive return MSE | 0.0263074 | 0.0182247 |
+| Inner-training-mean MSE | 0.1195215 | 0.0339193 |
+| Maximum Shapley fragment return error | 2.98e-8 | 2.33e-10 |
+| Minimum redistributed reward | -0.2847183 | -0.0224306 |
+| Maximum redistributed reward | 1.0 | 1.0 |
+
+Both diagnostic gates passed. These are predictor diagnostics, not CQL policy
+evaluation results. Negative step rewards are allowed and sums are conserved.
+The common W&B best-score table is the source for subsequent policy comparisons.
