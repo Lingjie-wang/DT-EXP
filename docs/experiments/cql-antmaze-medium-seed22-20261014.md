@@ -70,3 +70,46 @@ before all learning, missing checkpoint/incomplete history rejection, handling
 of completed training with nonzero exit, and comparison tables selecting maxima.
 Existing success-boundary tests cover reward conservation, grouped folds,
 padding/masking, real small cross-fitting and shared-GPU admission.
+
+## Validation receipt
+
+Implementation: `7ddd4b7fd1615ca9ea0a87072b59c9042bb75c0f`, published directly
+to `main`. Ruff 0.0.278 passed on a clean tracked-file export. All 32 relevant
+unit tests passed in the existing isolated server runtime with CUDA hidden;
+these include the Medium campaign, success boundaries, shared Shapley core,
+official runner and retry tests. Python compilation and `bash -n` also passed.
+GitHub Actions [run 38583424184](https://github.com/Lingjie-wang/DT-EXP/actions/runs/38583424184)
+completed successfully.
+
+Pinned upstream configuration SHA256:
+
+- medium-play: `af70ab55185ea22c5a2b2b5cfc3e3b6cb523e7478e5a60fe8469c5f684d26211`
+- medium-diverse: `42f0a6b888ce73fea7f24976ca0e8dd70bbcc277421a58f48a23d6d979079fc7`
+
+Official D4RL downloads (HTTPS equivalent of the registered dataset URLs):
+
+- medium-play, 231,110,764 bytes:
+  `c9fec1c1daad97c71d61bd47f4ccc9f74faa855b8a2d2e8107d5378018827e5b`
+- medium-diverse, 231,095,166 bytes:
+  `ad9dcbac05d1f8744a7a216083f513662f43f64f28a4a5eb225e9811902dfae7`
+
+## Queue receipt, 2026-10-14 23:01 Asia/Shanghai
+
+The persistent tmux session `cql-antmaze-medium-20261014` is running on the
+5090 server. The campaign records all six jobs as `queued`, with pipeline and
+queue stage `waiting_for_predecessor`. No predictor output or training
+directory exists yet. The predecessor Umaze Shapley run has completed 1M;
+Umaze-Diverse Shapley is still running, so the dependency barrier remains closed.
+
+Both raw files passed server-side structure checks: each contains 1,000,000
+records and yields 999,000 official retained transitions. Medium-play has
+9,787 raw success flags and 10,752 nonempty success/timeout fragments;
+medium-diverse has 1,959 success flags and 2,955 fragments. Fragment returns
+are all zero or one, and raw rewards equal the success terminal flags.
+
+[W&B comparison](https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/6edaf335-f243-4547-8cd1-aa2ae35ba36d)
+was read back through the W&B API: all six jobs are queued, the best-score
+table has six pending rows, and the evaluation table has zero rows. Curves
+will appear after actual 100-episode evaluations. W&B flattens the per-job
+summary fields as `job_states.<job_id>`. Local provenance and readback receipts
+are retained inside the ignored campaign directory.
