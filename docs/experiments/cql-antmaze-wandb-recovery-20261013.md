@@ -49,3 +49,28 @@ tmux new-session -d -s cql-antmaze-wandb-recovery-20261013 \
 Inspect `status.json` and `cursors.json` under `OUT`. Verify uploaded history samples
 and comparison tables against native records after replay, and keep any remaining
 cloud/local discrepancy explicit.
+
+## Completion recovery on 2026-10-14
+
+Both uniform jobs finished all 1M updates and 20 evaluations, but the old SDK
+blocked in its atexit file-stream shutdown. Their best scores are 93 at 550k
+(Umaze) and 62 at 850k (Diverse), versus original-reward controls 94 and 55.
+The cloud comparison table contained all 80 evaluation rows before intervention.
+
+Recovery evidence is saved separately under
+`results/cql-antmaze-finish-recovery-20261014`: the original queue snapshot,
+complete evaluations, checkpoint hashes, checkpoint `total_it == 1000000`,
+finite actor/critic weights, native exit code 0, process identities and signals.
+Two SIGINTs to each completed job's W&B backend stopped its writer gracefully,
+flushing the buffered native tail. After verifying writer closure and replay of
+all 1M history rows, SIGINT released the completed CLI's atexit wait, and the
+remaining backend was terminated. No model training was interrupted or restarted.
+The original queue records CLI exit 255 as `failed`; this is a telemetry shutdown
+failure, while the independently verified training is complete. Both W&B runs
+are `finished`, including the final evaluations. The unchanged queue then admitted
+the Shapley jobs under its existing resource limits.
+
+A partial buffered tail must not cause one-second idle heartbeats. The relay now
+waits 30 seconds when a scan makes no progress, backs off on network errors, and
+does not repost completed runs. Fast replay remains enabled for readable backlog.
+This avoids consuming upload quota needed by newly started training runs.

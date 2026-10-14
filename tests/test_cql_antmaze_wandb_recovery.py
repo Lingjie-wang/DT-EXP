@@ -2,12 +2,18 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import requests
 from wandb.proto import wandb_internal_pb2
 from wandb.sdk.internal.datastore import DataStore
 
-from scripts.cql_antmaze_success_wandb_recovery.relay import safe_summary, scan, send
+from scripts.cql_antmaze_success_wandb_recovery.relay import (
+    relay,
+    safe_summary,
+    scan,
+    send,
+)
 
 def record(step, extra=None):
     pb = wandb_internal_pb2.Record()
@@ -31,6 +37,7 @@ def native_file(path, records):
 
 class FakeSession:
     def __init__(self, fail_after_accept=False):
+        self.headers = {}
         self.rows = []
         self.payloads = []
         self.fail_after_accept = fail_after_accept
@@ -51,6 +58,42 @@ class FakeSession:
 
 
 class RecoveryTest(unittest.TestCase):
+    def test_buffered_tail_waits_and_finished_run_is_not_reposted(self):
+        module = "scripts.cql_antmaze_success_wandb_recovery.relay"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out = root / "recovery"
+            out.mkdir()
+            (root / "queue").mkdir()
+            (root / "queue/status.json").write_text('{"jobs": {}}')
+            (root / "plan.json").write_text(json.dumps(dict(
+                jobs=[], wandb_entity="test", wandb_project="test")))
+            entries, states = [], {}
+            for name in ["finished", "partial"]:
+                path = root / f"{name}.wandb"
+                path.write_bytes(b"buffered header")
+                entries.append(dict(name=name, id=name, path=path,
+                                    summary=root / "missing-summary.json"))
+                stat = path.stat()
+                states[name] = dict(path=str(path), device=stat.st_dev,
+                                    inode=stat.st_ino, run_id=name,
+                                    history_lines=10, offset=0,
+                                    complete=name == "finished")
+            (out / "cursors.json").write_text(json.dumps(states))
+            session = FakeSession()
+            batch = dict(offset=0, histories=[], exit_code=None,
+                         caught_up=False, scanned_bytes=0)
+            with patch(module + ".discover", return_value=entries), \
+                    patch.dict("os.environ", {"WANDB_API_KEY": "test"}), \
+                    patch(module + ".scan", return_value=batch) as scanner, \
+                    patch(module + ".requests.Session", return_value=session), \
+                    patch(module + ".time.sleep", side_effect=StopIteration) as sleep:
+                with self.assertRaises(StopIteration):
+                    relay(root, out)
+            sleep.assert_called_once_with(30)
+            self.assertEqual(scanner.call_count, 1)
+            self.assertEqual(len(session.payloads), 1)
+
     def test_batches_preserve_original_history_and_nested_values(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "run.wandb"

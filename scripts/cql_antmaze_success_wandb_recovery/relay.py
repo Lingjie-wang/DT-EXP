@@ -135,6 +135,7 @@ def relay(root, out, once=False):
         states = read(states_path) if states_path.exists() else {}
         while True:
             errors, all_caught_up = {}, True
+            quick_retry = False
             queue = read(root / "queue/status.json")
             for entry in discover(root, plan):
                 name, path = entry["name"], entry["path"]
@@ -144,6 +145,8 @@ def relay(root, out, once=False):
                 state = states.get(name, dict(**signature, history_lines=0))
                 if any(state.get(k) != v for k, v in signature.items()):
                     raise ValueError("Native source changed; inspect before recovery")
+                if state.get("complete"):
+                    continue
                 endpoint = (f"https://api.wandb.ai/files/{plan['wandb_entity']}/"
                             f"{plan['wandb_project']}/{entry['id']}/file_stream")
                 try:
@@ -168,6 +171,10 @@ def relay(root, out, once=False):
                         if batch["caught_up"] or batch["scanned_bytes"] == 0:
                             break
                     all_caught_up &= batch["caught_up"]
+                    # A buffered partial tail has no replayable backlog. Poll it
+                    # normally rather than sending one heartbeat per second.
+                    quick_retry |= (not batch["caught_up"]
+                                    and batch["scanned_bytes"] > 0)
                 except Exception as error:
                     errors[name] = dict(type=type(error).__name__, message=str(error))
                     all_caught_up = False
@@ -181,7 +188,7 @@ def relay(root, out, once=False):
             if once or (states and all(s.get("complete") for s in states.values())
                         and len(states) == len(plan["jobs"]) + 1):
                 return
-            time.sleep(30 if all_caught_up else 1)
+            time.sleep(1 if quick_retry and not errors else 30)
 
 
 if __name__ == "__main__":
