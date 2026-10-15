@@ -113,3 +113,38 @@ table has six pending rows, and the evaluation table has zero rows. Curves
 will appear after actual 100-episode evaluations. W&B flattens the per-job
 summary fields as `job_states.<job_id>`. Local provenance and readback receipts
 are retained inside the ignored campaign directory.
+
+## W&B shutdown blockage and recovery, 2026-10-15
+
+Umaze-Diverse Shapley finished its final checkpoint at 2026-10-14 23:17:56
+Asia/Shanghai, but W&B 0.12.21 remained in its atexit upload wait for roughly
+nine hours. The Medium dependency correctly observed a live predecessor process,
+but the deployment lacked automatic handling of this known shutdown failure.
+GPU availability was not the blocker. Scientific training was complete: 1M
+updates, all 20 evaluations, best score 64, final score 61.
+
+Recovery evidence is kept separately in
+`results/cql-antmaze-finish-recovery-20261015`. The checkpoint's `total_it` is
+1M and all actor/critic parameters are finite. The native W&B exit record is 0.
+Two SIGINTs to the identified W&B backend closed its writer and flushed the last
+buffered history row. The existing relay acknowledged all 1,000,000 history rows
+before the completed CLI's atexit wait was released. The historical queue records
+the actual CLI exit 255; its evidence is preserved. The Medium barrier then
+opened automatically and started fitting the medium-play reward predictor.
+
+An independent helper, `scripts/cql_antmaze_finish_guard_5090/guard.py`, now
+supports the six formal Medium training jobs without changing frozen learners,
+configs, rewards, queue records or the existing pipeline. It gives normal W&B
+shutdown at least 600 seconds. It acts only after complete evaluation/checkpoint
+evidence, finite weights, a native success exit record, exact run/file identity,
+and proof that a child of the recorded trainer owns the native W&B file.
+Linux pidfds and process start times prevent signals reaching reused PIDs.
+The trainer is released only after writer closure and the relay's full-history
+HTTP acknowledgement. It does not terminate active learning, shorten training,
+or infer success from elapsed time alone. Errors remain visible in its separate
+status and evidence files. CPU/GPU preflights are outside this helper's scope.
+
+The six guard tests and six Medium queue tests pass in the isolated server
+runtime; clean-export Ruff and Python compilation pass. The helper is deployed
+as a separate frozen source copy with its own tmux session and output directory
+`results/cql-antmaze-medium-finish-guard-20261015`.
