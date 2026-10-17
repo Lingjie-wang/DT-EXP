@@ -70,9 +70,29 @@ Submission IDs are recorded in `slurm/submission.json`; status is in
 
 ## Validation
 
-Three focused tests verify migration preserves frozen inputs and provenance,
+Four focused tests verify migration preserves frozen inputs and provenance,
 rejects active/trained source campaigns and repeated adoption, and treats a
-cancelled Slurm task as terminal instead of waiting forever. Bash syntax checks
+cancelled Slurm task as terminal instead of waiting forever, and select the
+correct attempt across arrays after a node failure. Bash syntax checks
 cover the environment and array launchers. Run Ruff against a clean Git export
 before pushing the new entrypoint to main. Existing unrelated changes in the
 Slurm working tree are preserved; deploy an isolated committed source checkout.
+
+## Node failure during the first Slurm launch
+
+Array 16082 originally allocated original/delayed to gl2. Both data audits and
+100-update GPU training completed; the delayed formal run logged 873 updates to
+W&B, with no complete 5k evaluation. gl2 then stopped reporting worker heartbeats
+and native telemetry. `sstat` and a diagnostic step returned communication errors.
+Slurm itself marked tasks 16082_0 and 16082_1 `NODE_FAIL` (exit 1:0), while
+16082_2/3 were allocated to gl1. No running training task was cancelled by us.
+
+Recover only the two terminal failed tasks in a fresh directory, preserving the
+failed attempt's logs and all frozen inputs. Retain the already running uniform
+and Shapley tasks; link their output directories into the comparison root without
+altering their original paths. Queue the replacement pair after the original
+array finishes (`afterany`), excluding gl2, to preserve the two-job concurrency
+limit. The observer selects one exact Slurm task per arm across both arrays; its
+accounting must ignore failed attempts and batch/extern substeps. No failed
+attempt has a full evaluation to mix into the comparison. The W&B comparison ID,
+scientific settings, seed and original reward files remain the same.

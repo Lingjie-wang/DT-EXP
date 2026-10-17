@@ -30,9 +30,24 @@ def aggregate(root, plan, accounting):
     return dict(stage=stage, jobs=states, updated_unix=time.time())
 
 
+def parse_accounting(report, jobs, submitted):
+    indices = {job["id"]: index for index, job in enumerate(jobs)}
+    if (len(submitted) != len(indices)
+            or set(indices) != {item["id"] for item in submitted}):
+        raise ValueError("Each comparison arm needs exactly one submitted task")
+    tasks = {item["slurm_id"]: indices[item["id"]] for item in submitted}
+    accounting = {}
+    for line in report.splitlines():
+        identity, state = line.split("|")[:2]
+        if identity in tasks:
+            accounting[tasks[identity]] = state.split()[0]
+    return accounting
+
+
 def observe(root):
     plan = read(root / "plan.json")
     submission = read(root / "slurm/submission.json")
+    arrays = sorted({j["slurm_id"].split("_")[0] for j in submission["jobs"]})
     with (root / "slurm/observer.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with (root / "comparison/console.log").open("a") as stream:
@@ -43,14 +58,10 @@ def observe(root):
             while True:
                 try:
                     report = subprocess.check_output(["sacct", "--array", "-n", "-P", "-j",
-                        str(submission["array_job_id"]), "--format=JobID,State"],
+                        ",".join(arrays), "--format=JobID,State"],
                         text=True, timeout=30)
-                    accounting = {}
-                    for line in report.splitlines():
-                        identity, state = line.split("|")[:2]
-                        prefix = str(submission["array_job_id"]) + "_"
-                        if identity.startswith(prefix) and identity[len(prefix):].isdigit():
-                            accounting[int(identity[len(prefix):])] = state.split()[0]
+                    accounting = parse_accounting(report, plan["jobs"],
+                                                  submission["jobs"])
                     snapshot = aggregate(root, plan, accounting)
                     write(root / "queue/status.json", snapshot)
                     write(root / "slurm/observer_status.json", dict(

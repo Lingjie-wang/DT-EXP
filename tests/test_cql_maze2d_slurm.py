@@ -4,7 +4,7 @@ from pathlib import Path
 
 from scripts.cql_antmaze_official_5090.common import digest, read, write
 from scripts.cql_maze2d_slurm.migrate import migrate
-from scripts.cql_maze2d_slurm.observe import aggregate
+from scripts.cql_maze2d_slurm.observe import aggregate, parse_accounting
 
 class SlurmMigrationTest(unittest.TestCase):
     def test_migration_preserves_frozen_inputs_and_requires_explicit_fresh_run(self):
@@ -40,6 +40,16 @@ class SlurmMigrationTest(unittest.TestCase):
                     formal_training_started=training, remaining_processes=processes))
                 with self.assertRaises(ValueError):
                     migrate(root, root, Path("/runtime/bin/python"))
+
+    def test_recovery_uses_only_selected_attempt_for_each_arm(self):
+        jobs = [dict(id=name) for name in ["original", "delayed", "uniform", "shapley"]]
+        submitted = [dict(id=j["id"], slurm_id=task) for j, task in zip(
+            jobs, ["20_0", "20_1", "10_2", "10_3"])]
+        report = ("10_0|NODE_FAIL|\n10_1|NODE_FAIL|\n10_2|RUNNING|\n"
+                  "10_3|COMPLETED|\n20_0|PENDING|\n20_1|RUNNING|\n"
+                  "20_1.batch|RUNNING|\n")
+        self.assertEqual(parse_accounting(report, jobs, submitted),
+                         {0: "PENDING", 1: "RUNNING", 2: "RUNNING", 3: "COMPLETED"})
 
     def test_scheduler_cancellation_cannot_leave_observer_waiting_forever(self):
         with tempfile.TemporaryDirectory() as directory:
