@@ -1,5 +1,10 @@
 # Maze2D four-arm campaign: move from 5090 to Slurm
 
+**Active deployment:** GPUNorm array `16098`, using the unchanged scientific
+inputs in `results/cql-maze2d-umaze-four-rewards-seed23-1m-slurm-gpunorm-20261017`.
+Use `run_gpunorm.sbatch` for this routing. Earlier GPULite attempts below are
+retained only as infrastructure diagnostics, not experimental results.
+
 On 2026-10-17 the user requested stopping the 5090 campaign and returning to
 Slurm. The 5090 process group 1721973 (pipeline, comparison uploader and its
 children) was stopped and verified empty before migration. All four arms were
@@ -96,3 +101,29 @@ limit. The observer selects one exact Slurm task per arm across both arrays; its
 accounting must ignore failed attempts and batch/extern substeps. No failed
 attempt has a full evaluation to mix into the comparison. The W&B comparison ID,
 scientific settings, seed and original reward files remain the same.
+
+## Final routing: GPUNorm array 16098
+
+The intermediate gl1 uniform/Shapley tasks also never entered worker
+initialization. A read-only step showed both Python processes in kernel NFS
+wait (`nfs_wait_bit_killable` / `d_alloc_parallel`), CPU time about one second,
+with no worker status, preflight or training directories. Stop these unstarted
+tasks without losing training progress. The replacement pair 16095 subsequently
+entered the same node and was also verified in `rpc_wait_bit_killable` with all
+three paths absent before stopping it. Preserve every old directory and add
+`gpunorm_recovery_manifest.json` pointers; arrays 16082 and 16095 are retired.
+
+A short allocated CPU probe on gn3 imported the same Torch/W&B environment in
+six seconds. Submit the unchanged four-arm campaign as array 16098 in GPUNorm,
+excluding gn[1-2,6-13] (the previous experiment routing's established node set).
+Each arm still receives one GPU, two CPU cores, 8 GiB RAM, 72-hour allocation,
+1M updates, 5k/100 evaluation schedule and seed 23. At most two arms run at once.
+Original and delayed started on gn5 and gn3 and passed the full data audits;
+uniform and Shapley wait for the array slots. The active manifest is
+`results/cql-maze2d-umaze-four-rewards-seed23-1m-slurm-gpunorm-20261017/slurm/submission.json`.
+
+The actual submission used `run.sbatch` with explicit CLI overrides
+`--partition=GPUNorm --exclude=gn[1-2,6-13]`. The independent
+`run_gpunorm.sbatch` records equivalent scheduler defaults for future use.
+No frozen source in an active campaign was edited. The W&B comparison run ID
+is unchanged; all older attempts have zero completed formal evaluations.
