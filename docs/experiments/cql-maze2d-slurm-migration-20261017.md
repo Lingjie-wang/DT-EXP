@@ -24,6 +24,18 @@ Torch 1.11.0 cu113 environment, with a dedicated virtual environment containing
 W&B 0.12.21 and protobuf 3.20.3. NumPy remains 1.23.1. Torch 1.11 CUDA execution
 was verified on an allocated RTX 2080 Ti, and the compute node can reach W&B.
 Record exact runtime versions and GPU identity in each job's `runtime.json`.
+Install `mjrl` from commit `3871d93763d3b49c4741e6daeaebbc605fe140dc`,
+matching the verified 5090 runtime: pinned D4RL imports hand environments before
+Maze2D, so missing `mjrl` prevents Maze2D registration.
+MuJoCo-py 2.1.2.14 is installed inside the dedicated virtual environment so its
+compiled extensions do not share the historical environment cache. On Debian 13,
+GCC 14 rejected this old dependency's implicit function declarations and integer
+pointer conversions. Restore the older compiler's warning behavior through
+`-Wno-error=implicit-function-declaration -Wno-error=int-conversion`, alongside
+the existing incompatible-pointer warning flags. Include the base environment's
+`bin` directory for `patchelf`. These are build-environment settings, with no
+changes to CQL, D4RL, rewards or MuJoCo-py source. The login node also lacks
+OSMesa headers, so validate MuJoCo on the allocated GPU nodes using EGL.
 There is no training source modification or algorithm monkey patch.
 
 ## Scheduling and durable status
@@ -44,7 +56,8 @@ After all 200 evaluations and the final checkpoint exist, allow 5 minutes for
 native W&B shutdown before stopping only that worker's finished training child.
 
 The lightweight observer tracks per-worker state and Slurm accounting, including
-cancellation, timeout and OOM. It resumes the original comparison run:
+cancellation, timeout and OOM. Read `sacct JobID` (array index identity), not
+`JobIDRaw` (the internal numeric allocation ID). It resumes the original comparison run:
 https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/626e7ba3-836b-4a21-bd4c-1605587077d2
 The original comparison logic still excludes all preflight evaluations and
 publishes four curves, a common evaluation table and best-score table.

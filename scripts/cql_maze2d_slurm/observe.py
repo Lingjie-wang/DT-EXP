@@ -43,7 +43,7 @@ def observe(root):
             while True:
                 try:
                     report = subprocess.check_output(["sacct", "-n", "-P", "-j",
-                        str(submission["array_job_id"]), "--format=JobIDRaw,State"],
+                        str(submission["array_job_id"]), "--format=JobID,State"],
                         text=True, timeout=30)
                     accounting = {}
                     for line in report.splitlines():

@@ -4,10 +4,11 @@ ROOT=${1:?campaign root required}
 BASE=/labmount/users/202615385/miniforge3/envs/adt-delayed
 PYTHON=/labmount/users/202615385/code/DT-EXP/.runtime/cql-maze2d-slurm-wandb012-20261017/bin/python
 export MUJOCO_PY_MUJOCO_PATH=/labmount/users/202615385/.mujoco/mujoco210
+export PATH="${PYTHON%/python}:$BASE/bin:$PATH"
 export C_INCLUDE_PATH="$BASE/include:${C_INCLUDE_PATH:-}"
 export LIBRARY_PATH="$BASE/lib:${LIBRARY_PATH:-}"
 export LD_LIBRARY_PATH="$BASE/lib:$MUJOCO_PY_MUJOCO_PATH/bin:/usr/lib/nvidia:${LD_LIBRARY_PATH:-}"
-export CFLAGS="${CFLAGS:-} -Wno-error=incompatible-pointer-types -Wno-incompatible-pointer-types"
+export CFLAGS="${CFLAGS:-} -Wno-error=incompatible-pointer-types -Wno-incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion"
 export OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2
 export PYTHONUNBUFFERED=1 PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
 export PYOPENGL_PLATFORM=egl MUJOCO_GL=egl WANDB_CONSOLE=off WANDB_DISABLE_CODE=true
