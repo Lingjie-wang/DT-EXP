@@ -57,7 +57,8 @@ native W&B shutdown before stopping only that worker's finished training child.
 
 The lightweight observer tracks per-worker state and Slurm accounting, including
 cancellation, timeout and OOM. Read `sacct JobID` (array index identity), not
-`JobIDRaw` (the internal numeric allocation ID). It resumes the original comparison run:
+`JobIDRaw` (the internal numeric allocation ID), and expand arrays with
+`--array` so pending or cancelled tasks are also individually visible. It resumes the original comparison run:
 https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/626e7ba3-836b-4a21-bd4c-1605587077d2
 The original comparison logic still excludes all preflight evaluations and
 publishes four curves, a common evaluation table and best-score table.
