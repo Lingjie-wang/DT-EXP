@@ -1,0 +1,343 @@
+{
+  "captured_date": "2026-10-13",
+  "source_project": "/home/sckd02/workspace/DT-EXP",
+  "server_head": "50d9c05bdf3ae08d70dc2fed0b311a31fb6c58ef",
+  "github_main_before": "4a74acf2b37e38d2cefa854ea5a7a1eebe3f41c0",
+  "status": "historical-source-archive-not-validated-for-execution",
+  "archive_sha256": "7da361139871e44212982ed20a36c2ae49f8e979558ef66c8ff27875c7047a67",
+  "files": [
+    {
+      "path": "algorithms/offline/action_consensus_diagnostic.py",
+      "blob": "36b7ef194453b1cf7276f72597366f755c6c81e6",
+      "bytes": 37864,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "1f28cef4d16eac7b68b728cdd8e65ab40122d976ceb63010ea4d72972a519205",
+      "mode": "0o644"
+    },
+    {
+      "path": "algorithms/offline/diagnose_dt_action_patterns.py",
+      "blob": "cf0714af9814f951e59ffa6fcad0e98370afad81",
+      "bytes": 28427,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "9e61610848ed10a9ddbd97ca340907ad873d429e2a02e1963be39e3009e33d2a",
+      "mode": "0o644"
+    },
+    {
+      "path": "algorithms/offline/lpt_compat.py",
+      "blob": "d4d95442b99db0b0f0ca38ecd88483bab4f1a0e3",
+      "bytes": 10268,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "a32382cfe204d03c9cda833e71ab7e4949d91470d06da71f2de9a78901bcf1f6",
+      "mode": "0o644"
+    },
+    {
+      "path": "algorithms/offline/lpt_repro.py",
+      "blob": "f7fd0a7bd77d5afecf2d55cbb864ffa9d49155d2",
+      "bytes": 24798,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "53e9641d8905162ddc503621a3259afa80dbfcc3c022a3c72b189925bbdc09c7",
+      "mode": "0o644"
+    },
+    {
+      "path": "algorithms/offline/segment_behavior_analysis.py",
+      "blob": "5ff42e707ddae90e375218f982ab2bab803ebff3",
+      "bytes": 19002,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "99ef009d37e6ec38c4195f09d23370af06d71b6d8b9e07ae3dbbe61f1f7524f4",
+      "mode": "0o644"
+    },
+    {
+      "path": "algorithms/offline/segment_delayed_dt.py",
+      "blob": "e1254aa22e0bd877f8a880961621cb4e479b21a3",
+      "bytes": 19769,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "d0d573ab3490c8ef5e3cf5b536733ce6b13bd5f345ee7a3b2a5ef95af0776f61",
+      "mode": "0o644"
+    },
+    {
+      "path": "algorithms/offline/threshold_dt.py",
+      "blob": "8768e995813ca1db6e090cfadeb7393bbf8f43d3",
+      "bytes": 24353,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "3a01d849b649079ad80b1dcfa98a54f5ebad88b7f240b41d2c664d87281e80ca",
+      "mode": "0o644"
+    },
+    {
+      "path": "docs/action_consensus_diagnostic.md",
+      "blob": "dfd576ea928da2e2ab424f4a09db2bc6cf7ba282",
+      "bytes": 3112,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "b4c88bbf0583f48094e52e35e3f058f3e7faea600c72dc0637a90be4a815b90c",
+      "mode": "0o644"
+    },
+    {
+      "path": "docs/dt_action_patterns.md",
+      "blob": "8f91881a3f5448ba43dbbdadc9d512506c142aba",
+      "bytes": 3567,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "ac584a72dc6375dbe52ca37a0c15fabdb5c9400743dc87f433c96367ccc8b488",
+      "mode": "0o644"
+    },
+    {
+      "path": "docs/lpt_reproduction.md",
+      "blob": "440c31da45b2a875c84fad00ef397b2e3afaf403",
+      "bytes": 6053,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "eacef0c13659ed5570b825e7ce2b5b200f23ecc6a40157741425ff55329dc743",
+      "mode": "0o644"
+    },
+    {
+      "path": "docs/segment_behavior_analysis.md",
+      "blob": "9e0e002ce5d66b24970c05b17d897bcc300ae1ab",
+      "bytes": 3497,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "dd0a2b0b2f644af51cb2568f1e15e67431c64ba7b8c8faf4d9e78428fde027a6",
+      "mode": "0o644"
+    },
+    {
+      "path": "docs/segment_delayed_dt.md",
+      "blob": "8711b131b7f1d1669edf24ff9d8d03c62e8b9008",
+      "bytes": 3146,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "b6c997360c4a7ef460d3df6171ef0763a7a1bdf5d09c3fbed18a9adb06c00c62",
+      "mode": "0o644"
+    },
+    {
+      "path": "docs/state_only_c_5090.md",
+      "blob": "700701dfcfa37ab97c99083d2266a6c367cc0d8b",
+      "bytes": 4777,
+      "untracked": true,
+      "category": "superseded_local_copy",
+      "sha256": "18e749b6b9be0999d4858f7eae70bdd54b0b366f519edeb09f8e669eeebbc211",
+      "mode": "0o644"
+    },
+    {
+      "path": "docs/threshold_conditioned_dt.md",
+      "blob": "fe4e664849d1f3b927b7067017d6492167ed94eb",
+      "bytes": 12437,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "f8063520ff6478fd945170c6bf3a6f2474e10e5fcf0f20843ff356443017b288",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/finish_dt_action_patterns.py",
+      "blob": "44f411c4b03b2837a2f2d1fc5862a74b502e67a8",
+      "bytes": 7735,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "7aa58a3d5641dc6ebc6aca467cfc2719f2e84211a306f30935b7d7a2b9bf6889",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/plot_dt_action_patterns.py",
+      "blob": "1dd5cfab84c464174aeb6d923c7f6d0c213bf709",
+      "bytes": 7543,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "d7ed6dda177c566f966b8573291cbaf871241f685c33f208a89cdca910bc9407",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/plot_segment_behavior.py",
+      "blob": "df79502f65fc367854ad33702f12cf7ac73ffadc",
+      "bytes": 6413,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "d0e0288a3bee587e0ae316b18944db6e533cd33f258cb187df0c3d79c24b86c3",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/probe_threshold_resources.sbatch",
+      "blob": "921c7befd9bcdaa8498558a4bda56badb0c6de91",
+      "bytes": 1471,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "4f7d83699706d7498eaa9dccc0f66f1e3d45083c0fb452b23ac9bbc09f89dc88",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/run_action_consensus.sbatch",
+      "blob": "f9ce9b97270282ba227d01cc52988b6cf7a24500",
+      "bytes": 1465,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "7c1ccf60638b14d32266af936ed35808487dec4af76dc7c42c20b9d55df28f3f",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/run_dt_action_patterns.sbatch",
+      "blob": "0b4cc1ff2fdddf61b059013bc47a49d6b400d504",
+      "bytes": 1513,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "8f70b304a95c01e3f30f76dd9433ffa275da12527f3479a3e78fe1654cf64b5c",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/run_dt_action_patterns_cpu.sbatch",
+      "blob": "b6076034efb2b38dd0e824f7999c27a525f6e562",
+      "bytes": 1560,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "62152852938c962e8f104b45df123c39d9b2eb9e8708ce841ff444123cca6e50",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/run_segment_delayed_dt.sbatch",
+      "blob": "307e0ede2beb194a84f33234f1f433d7863ab47a",
+      "bytes": 1648,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "014051589582ab8fae52f3512c1db249d2506e9b801016c01d55713f7ce17d74",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/run_threshold_dt.sbatch",
+      "blob": "52774cd86eac069c6c09af4d199c641c7250b9a0",
+      "bytes": 1551,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "3bc743597a3fe78e7b8e11664d1882f2f0ee1961b84a76f36f29b4f9bd5e49c6",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/sync_segment_delayed_dt.py",
+      "blob": "0324197a9013ad8f4d04cd66564b0d40a76c8488",
+      "bytes": 13646,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "cbc95948153efda08559aa9465269ae7bf97a52605d6e111616d99447a5ead18",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/threshold_campaign.py",
+      "blob": "0c12257591000bd9db2c5130023f1513b86cd487",
+      "bytes": 14309,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "928e7e08d4d0957e979ff574e07437f27c44fd8f71266ef17cd06be90f73b95b",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/upload_action_consensus_analysis.py",
+      "blob": "1d0caa5ab79b68cf75d20d60c118cab046fe23db",
+      "bytes": 4683,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "59cd05a97203ef2b2aadca3aa45e8cfa94d66b534920ef67fea12e787dab93f8",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/upload_segment_behavior.py",
+      "blob": "267ab2db82a4439401f7d4285d82092e8ab38071",
+      "bytes": 5144,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "f76d55e033f84945858971f2867c8852d41f63c47a48092b10f0ee52f16dcf8e",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/dt_experiments/upload_threshold_wandb.py",
+      "blob": "d3aa9c2e462eba5ad53726f0c4fe8d7fd5959215",
+      "bytes": 11688,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "369e33734adaf18e5c7856b5232836c291663cd47a87d65ec336412724a6589b",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/lpt/run.sbatch",
+      "blob": "690f6e656739fdb5fceb809ba2e1ed9aaaadb6f2",
+      "bytes": 1573,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "eef83ed7306923ded3d5aee77018da9485b6febc188e1eb7b10cbad2f306cc51",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/lpt/sync_results.py",
+      "blob": "85c8c2c8bc730f5f88061facc432dfa7af03b6e5",
+      "bytes": 9222,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "620f71a603763ac9698a0155356f82a22c31d3b32b9d93d5418552b920e952ba",
+      "mode": "0o644"
+    },
+    {
+      "path": "scripts/state_only_c/run.sh",
+      "blob": "2dbba7868833b63f12c9c319d52538f26a587656",
+      "bytes": 811,
+      "untracked": true,
+      "category": "superseded_local_copy",
+      "sha256": "cb6ac0d8ebd4a38ff766a2cc2a6d50d06688428e0c22426123466c9e83aa6973",
+      "mode": "0o644"
+    },
+    {
+      "path": "tests/test_action_consensus_diagnostic.py",
+      "blob": "430070eaa2eee4dc799ae1cee66a2bd18e06efcb",
+      "bytes": 4650,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "304c17556528c8676ce3f66082770e5d966a60ca1898cc2ca4d8513ddaec62e6",
+      "mode": "0o644"
+    },
+    {
+      "path": "tests/test_dt_action_patterns.py",
+      "blob": "ad18c61717810c3433eb18aa7209c2368d77a149",
+      "bytes": 3868,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "53ba35c4fd18e96ec799868868f565e454f62452ff98194f64f62b2a894a1159",
+      "mode": "0o644"
+    },
+    {
+      "path": "tests/test_lpt_repro.py",
+      "blob": "18d41cd85ad689791a55f15e723c20dc68623427",
+      "bytes": 7095,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "79190d0f4b797259160a63ff8f4fc35521d99fa05013f83525728e94a656fa38",
+      "mode": "0o644"
+    },
+    {
+      "path": "tests/test_segment_behavior_analysis.py",
+      "blob": "03b7f448c5c0cbcc01fa29308e1c5bf56b8fb2d8",
+      "bytes": 3046,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "7a3fd6b6aa27c2d6894ddd171afa74962345c8f7682a99ceaafd7de8920fff23",
+      "mode": "0o644"
+    },
+    {
+      "path": "tests/test_segment_delayed_dt.py",
+      "blob": "dcc2a8e59b7491fe5403b5d6fb045a93c9e435b8",
+      "bytes": 3587,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "a533b3a9484515608fab9ef43d295c02d277c3729b15a2e533ecb2f179839547",
+      "mode": "0o644"
+    },
+    {
+      "path": "tests/test_threshold_dt.py",
+      "blob": "1374d117490e1ae7e3064b42ac0c398dac32972c",
+      "bytes": 11069,
+      "untracked": true,
+      "category": "unpublished_historical_draft",
+      "sha256": "72722cf5dd6f5293fd0e0023d31365e041feaa0a2745b35de2b6f880d1970106",
+      "mode": "0o644"
+    }
+  ]
+}

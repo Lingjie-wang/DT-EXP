@@ -1,0 +1,73 @@
+{
+  "dataset": "AuctionNet non-final/general",
+  "source": "https://github.com/alimama-tech/NeurIPS_Auto_Bidding_General_Track_Baseline#dataset-link",
+  "checked_date": "2026-10-06",
+  "training_periods": [
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "evaluation_periods": [
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20
+  ],
+  "archives": [
+    {
+      "group": "7-8",
+      "url": "https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/autoBidding_general_track_data_period_7-8.zip",
+      "bytes": 1686696173,
+      "etag": "\"57E4D6E625C287E26A2CA3A5DC3944E4\""
+    },
+    {
+      "group": "9-10",
+      "url": "https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/autoBidding_general_track_data_period_9-10.zip",
+      "bytes": 1682406923,
+      "etag": "\"BA6033C8412CC356115C1DE453494C23\""
+    },
+    {
+      "group": "11-12",
+      "url": "https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/autoBidding_general_track_data_period_11-12.zip",
+      "bytes": 1709277387,
+      "etag": "\"5B3AE6E11190D21A71BD2D8189410D8F\""
+    },
+    {
+      "group": "13",
+      "url": "https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/autoBidding_general_track_data_period_13.zip",
+      "bytes": 838024389,
+      "etag": "\"9042BB47F4DE65F25E11BB4736F38C84\""
+    },
+    {
+      "group": "14-15",
+      "url": "https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/autoBidding_general_track_data_period_14-15.zip",
+      "bytes": 1681178027,
+      "etag": "\"6006ABF44FCBCE601C6C301FE28C57A1\""
+    },
+    {
+      "group": "16-17",
+      "url": "https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/autoBidding_general_track_data_period_16-17.zip",
+      "bytes": 1695102225,
+      "etag": "\"B613E9152DE8A8F589A7A74892E94926\""
+    },
+    {
+      "group": "18-19",
+      "url": "https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/autoBidding_general_track_data_period_18-19.zip",
+      "bytes": 1702444070,
+      "etag": "\"62FDD4351CD7227C6B2BB55C7495D6E6\""
+    },
+    {
+      "group": "20-21",
+      "url": "https://alimama-bidding-competition.oss-cn-beijing.aliyuncs.com/share/autoBidding_general_track_data_period_20-21.zip",
+      "bytes": 1701651927,
+      "etag": "\"B69DEF0A27279D965D97D81F1E2DA8DC\""
+    }
+  ]
+}

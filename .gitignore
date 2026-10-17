@@ -155,6 +155,7 @@ checkpoints/
 assets/
 
 # Local experiment artifacts and external checkouts
+/.runtime/
 /logs/
 /results/
 /third_party/

@@ -1,0 +1,129 @@
+# Maze2D four-arm campaign: move from 5090 to Slurm
+
+**Active deployment:** GPUNorm array `16098`, using the unchanged scientific
+inputs in `results/cql-maze2d-umaze-four-rewards-seed23-1m-slurm-gpunorm-20261017`.
+Use `run_gpunorm.sbatch` for this routing. Earlier GPULite attempts below are
+retained only as infrastructure diagnostics, not experimental results.
+
+On 2026-10-17 the user requested stopping the 5090 campaign and returning to
+Slurm. The 5090 process group 1721973 (pipeline, comparison uploader and its
+children) was stopped and verified empty before migration. All four arms were
+still queued: no formal training had started. The original directory and all
+preparation evidence remain intact, with an added `migration_stop.json`.
+
+## Scientific settings and provenance
+
+Continue the same campaign with seed 23, four arms, 1M updates, evaluation every
+5k updates over 100 episodes, native sparse evaluation rewards, and best observed
+score selection. The official CQL file, Maze2D YAML, pinned D4RL tree, original
+HDF5, delayed/uniform/Shapley HDF5 files and already fitted Shapley outputs are
+transferred without modification. Verify every frozen SHA256 before migration,
+every worker start and completion. Do not refit the predictor on the new server.
+The original plan and audits are retained in `provenance_5090/`; rerun the real
+D4RL loader audit on Slurm. This migration does not introduce a new seed.
+
+The frozen scientific protocol is documented in
+`cql-maze2d-umaze-four-rewards-20261017.md`. Its Python 3.10 / Torch 2.7.1 cu128
+runtime was required for the 5090. Slurm instead uses the existing Python 3.9 /
+Torch 1.11.0 cu113 environment, with a dedicated virtual environment containing
+W&B 0.12.21 and protobuf 3.20.3. NumPy remains 1.23.1. Torch 1.11 CUDA execution
+was verified on an allocated RTX 2080 Ti, and the compute node can reach W&B.
+Record exact runtime versions and GPU identity in each job's `runtime.json`.
+Install `mjrl` from commit `3871d93763d3b49c4741e6daeaebbc605fe140dc`,
+matching the verified 5090 runtime: pinned D4RL imports hand environments before
+Maze2D, so missing `mjrl` prevents Maze2D registration.
+MuJoCo-py 2.1.2.14 is installed inside the dedicated virtual environment so its
+compiled extensions do not share the historical environment cache. On Debian 13,
+GCC 14 rejected this old dependency's implicit function declarations and integer
+pointer conversions. Restore the older compiler's warning behavior through
+`-Wno-error=implicit-function-declaration -Wno-error=int-conversion`, alongside
+the existing incompatible-pointer warning flags. Include the base environment's
+`bin` directory for `patchelf`. These are build-environment settings, with no
+changes to CQL, D4RL, rewards or MuJoCo-py source. The login node also lacks
+OSMesa headers, so validate MuJoCo on the allocated GPU nodes using EGL.
+There is no training source modification or algorithm monkey patch.
+
+## Scheduling and durable status
+
+Use independent scripts in `scripts/cql_maze2d_slurm/`; preserve the original
+5090 entrypoints. A Slurm array has four tasks, ordered original, delayed,
+uniform, Shapley, at most two concurrently. Each task requests one GPU, two CPU
+cores, 8 GiB RAM and a 72-hour wall-clock limit in GPULite. Slurm assigns
+`CUDA_VISIBLE_DEVICES`; the launcher never overrides it. The 72-hour limit is
+an allocation limit, not a change to the 1M-update training budget.
+
+Each task validates the frozen inputs and performs a 100-update CUDA preflight
+with online W&B. Its one-episode evaluation is excluded from all scientific
+comparisons. The full job starts only after its preflight's native training
+telemetry and score have been verified remotely. Failures are recorded and do
+not silently restart or overwrite attempts. Automatic Slurm requeue is disabled.
+After all 200 evaluations and the final checkpoint exist, allow 5 minutes for
+native W&B shutdown before stopping only that worker's finished training child.
+
+The lightweight observer tracks per-worker state and Slurm accounting, including
+cancellation, timeout and OOM. Read `sacct JobID` (array index identity), not
+`JobIDRaw` (the internal numeric allocation ID), and expand arrays with
+`--array` so pending or cancelled tasks are also individually visible. It resumes the original comparison run:
+https://wandb.ai/2820402607-shandong-university/CORL-DDR/runs/626e7ba3-836b-4a21-bd4c-1605587077d2
+The original comparison logic still excludes all preflight evaluations and
+publishes four curves, a common evaluation table and best-score table.
+
+Slurm campaign directory:
+`/labmount/users/202615385/code/DT-EXP/results/cql-maze2d-umaze-four-rewards-seed23-1m-slurm-20261017`.
+Submission IDs are recorded in `slurm/submission.json`; status is in
+`queue/status.json`, `<arm>/slurm_status.json`, and `comparison/status.json`.
+
+## Validation
+
+Four focused tests verify migration preserves frozen inputs and provenance,
+rejects active/trained source campaigns and repeated adoption, and treats a
+cancelled Slurm task as terminal instead of waiting forever, and select the
+correct attempt across arrays after a node failure. Bash syntax checks
+cover the environment and array launchers. Run Ruff against a clean Git export
+before pushing the new entrypoint to main. Existing unrelated changes in the
+Slurm working tree are preserved; deploy an isolated committed source checkout.
+
+## Node failure during the first Slurm launch
+
+Array 16082 originally allocated original/delayed to gl2. Both data audits and
+100-update GPU training completed; the delayed formal run logged 873 updates to
+W&B, with no complete 5k evaluation. gl2 then stopped reporting worker heartbeats
+and native telemetry. `sstat` and a diagnostic step returned communication errors.
+Slurm itself marked tasks 16082_0 and 16082_1 `NODE_FAIL` (exit 1:0), while
+16082_2/3 were allocated to gl1. No running training task was cancelled by us.
+
+Recover only the two terminal failed tasks in a fresh directory, preserving the
+failed attempt's logs and all frozen inputs. Retain the already running uniform
+and Shapley tasks; link their output directories into the comparison root without
+altering their original paths. Queue the replacement pair after the original
+array finishes (`afterany`), excluding gl2, to preserve the two-job concurrency
+limit. The observer selects one exact Slurm task per arm across both arrays; its
+accounting must ignore failed attempts and batch/extern substeps. No failed
+attempt has a full evaluation to mix into the comparison. The W&B comparison ID,
+scientific settings, seed and original reward files remain the same.
+
+## Final routing: GPUNorm array 16098
+
+The intermediate gl1 uniform/Shapley tasks also never entered worker
+initialization. A read-only step showed both Python processes in kernel NFS
+wait (`nfs_wait_bit_killable` / `d_alloc_parallel`), CPU time about one second,
+with no worker status, preflight or training directories. Stop these unstarted
+tasks without losing training progress. The replacement pair 16095 subsequently
+entered the same node and was also verified in `rpc_wait_bit_killable` with all
+three paths absent before stopping it. Preserve every old directory and add
+`gpunorm_recovery_manifest.json` pointers; arrays 16082 and 16095 are retired.
+
+A short allocated CPU probe on gn3 imported the same Torch/W&B environment in
+six seconds. Submit the unchanged four-arm campaign as array 16098 in GPUNorm,
+excluding gn[1-2,6-13] (the previous experiment routing's established node set).
+Each arm still receives one GPU, two CPU cores, 8 GiB RAM, 72-hour allocation,
+1M updates, 5k/100 evaluation schedule and seed 23. At most two arms run at once.
+Original and delayed started on gn5 and gn3 and passed the full data audits;
+uniform and Shapley wait for the array slots. The active manifest is
+`results/cql-maze2d-umaze-four-rewards-seed23-1m-slurm-gpunorm-20261017/slurm/submission.json`.
+
+The actual submission used `run.sbatch` with explicit CLI overrides
+`--partition=GPUNorm --exclude=gn[1-2,6-13]`. The independent
+`run_gpunorm.sbatch` records equivalent scheduler defaults for future use.
+No frozen source in an active campaign was edited. The W&B comparison run ID
+is unchanged; all older attempts have zero completed formal evaluations.

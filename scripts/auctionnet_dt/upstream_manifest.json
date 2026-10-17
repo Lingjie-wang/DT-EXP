@@ -1,0 +1,24 @@
+{
+  "prgs_commit": "33bad7bc3e3f7cbfbefb68294b8e61069a6e58d4",
+  "auctionnet_commit": "c20de631a40e24669d1d6a8e2acefd8f492f172d",
+  "generator_sha256": "eedd82377c9141b3c3f3fc198fe98ca721254b19827bf04c1dfc0d20221415ad",
+  "files": {
+    "config/algo/bc.yaml": "2e2fe4c18565736be35b4be4dfcbd020cc8e30dba9a60f303b0d76a14c15b1d4",
+    "config/algo/bc_prgs.yaml": "36c4338876603a4f27b008c3e6c8013019c427f6e47f25e5b1e6325d8ae294a0",
+    "config/algo/dt.yaml": "3db8721999ad3cb29805d83c2d8c6ac5e2ca231ff83a45c634155e3460d24562",
+    "config/algo/dt_prgs.yaml": "99a65213fd7c09ecb255c3ca8e3fc0f0cc5d9210d5f8bfd2da846a968985147b",
+    "config/algo/pdit.yaml": "0f2d5f32ef0149c7e6834e6f9e0d3ef55d6bdc79eadfde445717b77a6d601fb2",
+    "config/algo/pdit_prgs.yaml": "9d6a6dbbd94c513b20d03f375b7aa40938eb47a631cb4beb349d5609d36f3c54",
+    "config/default.yaml": "c9b19b731cb15dbc1d2279af11144b9846e3ff1f87c2b1d0d5a7b91668738607",
+    "config/env/AuctionNet.yaml": "1915a68abc6439367d849ba779f2aed5143b8cfa047725d7d1a5b452339aee7d",
+    "eval.py": "b76162d3d1ae8b3ab490cb676ee70899fe28d43fb55af10f77e0931eca1e11ba",
+    "evaluation_bidding.py": "063ac388486406c71915ab8b405c669df3a9986f6234bba0de51edab0e57088d",
+    "main.py": "625f86ecd2a5d547160f6e67e3a650d0abe0e8df3b73d82c891079e34486004d",
+    "network.py": "911d99a816a83bcc5a1f4dc2cc63e428c3d6302b9aa84244c2990d693f53a333",
+    "offline_eval/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "offline_eval/offline_env.py": "5682f6779f03435d2eea71d708309365c32bb00e05ee94a58a171d8fe29d387f",
+    "offline_eval/test_dataloader.py": "56cb3b209a10887ee9a084b6326d7352b8715c872b05f0f90a9d80cf2cc0603c",
+    "trainner.py": "b222e9f419625a41fcebb5ca0726b95c176e13156fadb5fa1676707807891bf7",
+    "utils.py": "d7b179a6067f94ca26d9f1c900d55cc65945d92efe8febf03cd9f32b104e8ad9"
+  }
+}
